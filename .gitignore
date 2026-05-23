@@ -1,0 +1,19 @@
+# Local/reference data not pushed to GitHub
+applied_agentic_ai_vault/
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
+
+# Python/local runtime noise
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Generated data artifacts
+*.duckdb
+*.parquet
+*.sqlite
+*.sqlite3
