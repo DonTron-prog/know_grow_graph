@@ -46,7 +46,7 @@ Rendered view state is derived from:
 Render(CanonicalState, LayoutPreferences)
 ```
 
-This is an event-sourcing model. Accepted transform operations are immutable semantic events. The current branch graph is regenerated from the source graph and accepted operations.
+This is an event-sourcing model. Accepted transform operations are immutable semantic events. The current branch graph is deterministically materialized from the source graph and accepted operations.
 
 ### Canonical State
 
@@ -396,7 +396,537 @@ Clicking a transformed node or operation should show:
 - Selecting a loss badge opens the corresponding loss receipt.
 - Layout changes do not affect canonical state.
 
-## 9. Recommended Dependencies
+## 9. Materialization Semantics
+
+Materialization is the deterministic process that turns accepted operations into the semantic branch graph. Operation nodes themselves are not part of the materialized semantic graph; they appear only in lineage and audit views.
+
+### 9.1 Node Materialization
+
+- Merge inputs disappear from the materialized branch graph and remain visible in lineage.
+- Split inputs disappear from the materialized branch graph and remain visible in lineage.
+- Every source node removed from the materialized branch graph creates a node loss receipt.
+- Output node ids are deterministic slugs derived from output labels.
+- Each operation must create distinct output nodes. Two operations may not output the same node id.
+- Later operations may use nodes created by earlier operations, but lineage must remain traceable back to source nodes.
+- Materialized nodes preserve source references only when explicitly mapped.
+- Node relabeling or retyping requires an explicit `relabel_node` or `retype_node` operation.
+
+### 9.2 Edge Materialization
+
+- Merge operations transfer only edges explicitly mapped by the operation.
+- A merge operation with no edge mappings is valid; it creates output nodes without transferred branch edges.
+- Unmapped merge edges are retained as lineage-only evidence and are not materialized as branch edges.
+- Split edges are distributed to split outputs by LLM semantic assignment during acceptance/materialization preparation.
+- LLM split edge assignments are run once at acceptance and stored as canonical data for replay.
+- Duplicate materialized edges are collapsed into one edge with combined evidence and provenance.
+- Conflicting edge labels between the same nodes are resolved by the LLM into one chosen label.
+- LLM conflict resolution is stored canonically only when approved by the user.
+- If a conflict resolution is not user-approved, the lower-confidence edge is dropped from the materialized graph and retained as lineage-only evidence.
+- Dropped edges do not create loss receipts; only dropped nodes do.
+- Materialized edges preserve source evidence references only when explicitly mapped.
+- Edge relabeling or retyping requires an explicit `relabel_edge` or `retype_edge` operation.
+- A relabeled edge is represented during materialization as a mutation of the old edge label, backed by the explicit relabel/retype operation.
+
+### 9.3 Operation Ordering and Dependency Handling
+
+- Accepted operations replay in dependency order, with sequence number as the tie-breaker.
+- Invalid dependencies trigger an LLM repair attempt.
+- If LLM repair fails, acceptance of the dependent operation is blocked.
+- Rejected operations are ignored during replay but retained in audit/history.
+- Correcting an accepted operation creates a new branch from before the bad operation rather than mutating accepted history.
+
+### 9.4 Replay, Comparison, and Hypotheses
+
+- Deterministic replay requires an identical semantic graph. Layout, lineage rendering, and receipts are excluded from the strict replay equality check.
+- Branch comparison treats nodes as matching when their lineage overlaps, even if ids differ.
+- Hypothesis nodes and edges are included in branch comparison like normal graph elements, but visibly marked.
+- Hypotheses may be used as inputs to later operations and are treated like normal nodes for operation purposes.
+- If any input is hypothetical, the output is marked `partially_hypothetical`.
+
+### 9.5 Operation Metadata Requirements
+
+- LLM-proposed operations require rationale.
+- Human-authored operations may omit rationale.
+- LLM-proposed operations require evidence references when available.
+- Accepted operations store LLM confidence only.
+- Anti-merge candidates are outside MVP scope.
+- There is no hard cap on operation batch size for MVP, but the UI should warn for large batches.
+- Branch mode affects validation severity only. Materialization semantics do not change by branch mode.
+
+## 10. Canonical Schema and Validation Contracts
+
+The canonical store should be optimized for deterministic replay, efficient local queries, and compact LLM-readable exports.
+
+Recommended storage pattern:
+
+- DuckDB tables for canonical source graph, branches, operations, mappings, validation, and current materializations.
+- Parquet snapshots for versioned source/materialized node and edge tables.
+- JSONL exports for LLM-readable node, edge, and operation cards.
+
+Normalized tables are canonical. JSON fields are allowed for extensibility, but core replay fields should remain typed columns.
+
+### 10.1 Source Graph Tables
+
+#### `source_nodes`
+
+```sql
+CREATE TABLE source_nodes (
+  node_id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  node_type TEXT NOT NULL, -- concept, file, slide, etc.
+  path TEXT,
+  properties JSON,
+  created_at TIMESTAMP DEFAULT now()
+);
+```
+
+#### `source_edges`
+
+```sql
+CREATE TABLE source_edges (
+  edge_id TEXT PRIMARY KEY,
+  src_node_id TEXT NOT NULL,
+  dst_node_id TEXT NOT NULL,
+  rel TEXT NOT NULL,
+  weight DOUBLE DEFAULT 1.0,
+  evidence_count INTEGER DEFAULT 0,
+  properties JSON
+);
+```
+
+#### `source_refs`
+
+Source references are stored in a table rather than arrays so they can be joined, filtered, copied, or omitted efficiently.
+
+```sql
+CREATE TABLE source_refs (
+  ref_id TEXT PRIMARY KEY,
+  node_id TEXT,
+  edge_id TEXT,
+  ref_type TEXT NOT NULL, -- markdown_file, wikilink, slide, heading
+  ref_path TEXT NOT NULL,
+  ref_label TEXT,
+  start_line INTEGER,
+  end_line INTEGER
+);
+```
+
+### 10.2 Branch Tables
+
+#### `branches`
+
+```sql
+CREATE TABLE branches (
+  branch_id TEXT PRIMARY KEY,
+  parent_branch_id TEXT,
+  mode TEXT NOT NULL, -- exploratory, pedagogical, conservative, forensic
+  purpose TEXT NOT NULL,
+  loss_policy JSON,
+  branch_pointer TEXT,
+  created_at TIMESTAMP DEFAULT now()
+);
+```
+
+#### `branch_heads`
+
+```sql
+CREATE TABLE branch_heads (
+  branch_id TEXT PRIMARY KEY,
+  head_sequence_number BIGINT NOT NULL,
+  updated_at TIMESTAMP DEFAULT now()
+);
+```
+
+### 10.3 Transform Operation Tables
+
+Transform operations are compact parent rows. Inputs, outputs, source mappings, and edge mappings are stored in child tables.
+
+#### `transform_ops`
+
+```sql
+CREATE TABLE transform_ops (
+  op_id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL,
+  sequence_number BIGINT NOT NULL,
+
+  op_type TEXT NOT NULL, -- merge, split, relabel_node, retype_node, relabel_edge, retype_edge
+  theory TEXT,           -- required for merge/split
+
+  scope_type TEXT NOT NULL, -- selected_nodes, concept_layer, folder, full_graph, branch
+  scope_value TEXT,
+
+  status TEXT NOT NULL, -- draft, accepted, rejected, invalid
+  proposed_by TEXT NOT NULL, -- llm, human
+  accepted_at TIMESTAMP,
+
+  rationale TEXT,
+  llm_confidence DOUBLE,
+  properties JSON,
+
+  UNIQUE(branch_id, sequence_number)
+);
+```
+
+#### `transform_inputs`
+
+```sql
+CREATE TABLE transform_inputs (
+  op_id TEXT NOT NULL,
+  input_node_id TEXT NOT NULL,
+  input_node_kind TEXT NOT NULL, -- source, branch_materialized, hypothesis
+  ordinal INTEGER,
+  PRIMARY KEY (op_id, input_node_id)
+);
+```
+
+#### `transform_outputs`
+
+```sql
+CREATE TABLE transform_outputs (
+  op_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  output_node_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  node_type TEXT NOT NULL,
+  hypothesis_status TEXT NOT NULL, -- source_backed, hypothesis, partially_hypothetical
+  properties JSON,
+
+  PRIMARY KEY (op_id, output_node_id),
+  UNIQUE(branch_id, output_node_id)
+);
+```
+
+The `UNIQUE(branch_id, output_node_id)` constraint encodes the rule that two operations in the same branch cannot output the same node.
+
+### 10.4 Explicit Mapping Tables
+
+Explicit mappings are required where the spec says source references or edge evidence are preserved only if mapped.
+
+#### `node_source_mappings`
+
+```sql
+CREATE TABLE node_source_mappings (
+  mapping_id TEXT PRIMARY KEY,
+  op_id TEXT NOT NULL,
+  input_node_id TEXT NOT NULL,
+  output_node_id TEXT NOT NULL,
+  copy_source_refs BOOLEAN NOT NULL DEFAULT false,
+  rationale TEXT
+);
+```
+
+#### `edge_mappings`
+
+Used for merge edge transfer, explicit edge preservation, and lineage-only retention.
+
+```sql
+CREATE TABLE edge_mappings (
+  mapping_id TEXT PRIMARY KEY,
+  op_id TEXT NOT NULL,
+  old_edge_id TEXT NOT NULL,
+
+  new_src_node_id TEXT NOT NULL,
+  new_dst_node_id TEXT NOT NULL,
+  new_rel TEXT NOT NULL,
+
+  copy_evidence_refs BOOLEAN NOT NULL DEFAULT false,
+  mapping_status TEXT NOT NULL, -- materialized, lineage_only, dropped_conflict
+  rationale TEXT,
+  llm_confidence DOUBLE
+);
+```
+
+#### `split_edge_assignments`
+
+LLM split edge assignment happens once at acceptance and is stored canonically for deterministic replay.
+
+```sql
+CREATE TABLE split_edge_assignments (
+  assignment_id TEXT PRIMARY KEY,
+  op_id TEXT NOT NULL,
+  old_edge_id TEXT NOT NULL,
+
+  assigned_src_node_id TEXT,
+  assigned_dst_node_id TEXT,
+  assigned_rel TEXT,
+
+  assignment_status TEXT NOT NULL, -- materialized, lineage_only
+  rationale TEXT,
+  llm_confidence DOUBLE
+);
+```
+
+### 10.5 Conflict Resolution Tables
+
+```sql
+CREATE TABLE edge_conflicts (
+  conflict_id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL,
+  op_id TEXT NOT NULL,
+
+  src_node_id TEXT NOT NULL,
+  dst_node_id TEXT NOT NULL,
+
+  conflicting_edge_ids JSON NOT NULL,
+  conflicting_rels JSON NOT NULL,
+
+  llm_chosen_rel TEXT,
+  user_approved BOOLEAN NOT NULL DEFAULT false,
+
+  dropped_edge_id TEXT,
+  dropped_edge_retention TEXT NOT NULL DEFAULT 'lineage_only',
+
+  rationale TEXT,
+  created_at TIMESTAMP DEFAULT now()
+);
+```
+
+If the user approves conflict resolution, the chosen relation is materialized. If not approved, the lower-confidence edge is dropped from the materialized graph and retained as lineage-only evidence.
+
+### 10.6 Loss Receipt Table
+
+Loss receipts are node-only in the MVP. Dropped or unmapped edges are represented through edge mapping status or lineage-only evidence.
+
+```sql
+CREATE TABLE loss_receipts (
+  loss_id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL,
+  op_id TEXT NOT NULL,
+
+  loss_type TEXT NOT NULL DEFAULT 'node_removed',
+  old_node_id TEXT NOT NULL,
+
+  successor_node_ids JSON,
+  dropped_because TEXT,
+  impact TEXT,
+
+  blocking BOOLEAN NOT NULL DEFAULT false,
+  human_status TEXT NOT NULL DEFAULT 'unreviewed',
+
+  created_at TIMESTAMP DEFAULT now()
+);
+```
+
+### 10.7 Materialized Branch Tables
+
+Materialized branch tables may be regenerated, but storing them makes UI rendering, branch comparison, and LLM export faster.
+
+#### `materialized_nodes`
+
+```sql
+CREATE TABLE materialized_nodes (
+  branch_id TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  node_type TEXT NOT NULL,
+
+  origin_op_id TEXT,
+  hypothesis_status TEXT NOT NULL, -- source_backed, hypothesis, partially_hypothetical
+
+  lineage_hash TEXT,
+  properties JSON,
+
+  PRIMARY KEY (branch_id, node_id)
+);
+```
+
+#### `materialized_edges`
+
+```sql
+CREATE TABLE materialized_edges (
+  branch_id TEXT NOT NULL,
+  edge_id TEXT NOT NULL,
+
+  src_node_id TEXT NOT NULL,
+  dst_node_id TEXT NOT NULL,
+  rel TEXT NOT NULL,
+
+  origin_op_id TEXT,
+  source_edge_ids JSON,
+  evidence_ref_ids JSON,
+
+  weight DOUBLE DEFAULT 1.0,
+  properties JSON,
+
+  PRIMARY KEY (branch_id, edge_id)
+);
+```
+
+Materialized edge ids should be deterministic, for example:
+
+```text
+edge:{branch_id}:{src_slug}:{rel_slug}:{dst_slug}:{hash(source_edge_ids)}
+```
+
+### 10.8 Lineage Tables
+
+Operation nodes are not semantic graph nodes, but lineage should be stored explicitly for fast traversal and LLM-readable explanations.
+
+```sql
+CREATE TABLE lineage_links (
+  lineage_id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL,
+  op_id TEXT NOT NULL,
+
+  from_node_id TEXT NOT NULL,
+  to_node_id TEXT NOT NULL,
+
+  lineage_type TEXT NOT NULL, -- merge_input, split_input, source_to_output, hypothesis_to_output
+  source_depth INTEGER DEFAULT 0
+);
+```
+
+### 10.9 Validation Results
+
+```sql
+CREATE TABLE validation_results (
+  validation_id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL,
+  op_id TEXT,
+
+  severity TEXT NOT NULL, -- blocker, warning, info
+  code TEXT NOT NULL,
+  message TEXT NOT NULL,
+
+  repairable_by_llm BOOLEAN DEFAULT false,
+  requires_human BOOLEAN DEFAULT false,
+
+  status TEXT NOT NULL DEFAULT 'open', -- open, repaired, ignored, approved
+  created_at TIMESTAMP DEFAULT now()
+);
+```
+
+### 10.10 LLM-Readable Views and Exports
+
+LLMs should not read the raw normalized schema by default. The system should export compact cards that combine the most relevant canonical fields. Export jobs may enrich these views with lineage, input, output, and evidence details from child tables before writing JSONL.
+
+#### `llm_node_cards`
+
+```sql
+CREATE VIEW llm_node_cards AS
+SELECT
+  n.branch_id,
+  n.node_id,
+  n.label,
+  n.node_type,
+  n.hypothesis_status,
+  n.origin_op_id,
+  n.lineage_hash,
+  n.properties
+FROM materialized_nodes n;
+```
+
+Example JSONL card:
+
+```json
+{
+  "node_id": "prompt-control-surface",
+  "label": "Prompt Control Surface",
+  "type": "concept",
+  "hypothesis_status": "source_backed",
+  "lineage": ["Prompt", "Persona", "Few-Shot"],
+  "origin_op": "op-0042"
+}
+```
+
+#### `llm_edge_cards`
+
+```sql
+CREATE VIEW llm_edge_cards AS
+SELECT
+  e.branch_id,
+  e.edge_id,
+  e.src_node_id,
+  e.rel,
+  e.dst_node_id,
+  e.origin_op_id,
+  e.source_edge_ids,
+  e.evidence_ref_ids,
+  e.weight
+FROM materialized_edges e;
+```
+
+Example JSONL card:
+
+```json
+{
+  "edge_id": "edge:branch-a:prompt-control-surface:supports:agent-reliability:abc123",
+  "src": "prompt-control-surface",
+  "rel": "supports",
+  "dst": "agent-reliability",
+  "source_edge_ids": ["edge-001", "edge-044"],
+  "evidence_ref_ids": ["ref-210", "ref-236"]
+}
+```
+
+#### `llm_operation_cards`
+
+```sql
+CREATE VIEW llm_operation_cards AS
+SELECT
+  op_id,
+  branch_id,
+  sequence_number,
+  op_type,
+  theory,
+  scope_type,
+  status,
+  rationale,
+  llm_confidence
+FROM transform_ops
+WHERE status IN ('draft', 'accepted');
+```
+
+Example JSONL card:
+
+```json
+{
+  "op_id": "op-0042",
+  "type": "merge",
+  "theory": "pedagogical",
+  "inputs": ["Prompt", "Persona", "Few-Shot"],
+  "outputs": ["prompt-control-surface"],
+  "rationale": "These concepts function together as user-controllable prompt design levers.",
+  "confidence": 0.82
+}
+```
+
+### 10.11 Recommended Storage Layout
+
+```text
+data/project.duckdb
+data/parquet/source_nodes.parquet
+data/parquet/source_edges.parquet
+data/parquet/branches/{branch_id}/materialized_nodes.parquet
+data/parquet/branches/{branch_id}/materialized_edges.parquet
+data/ops/{branch_id}.jsonl
+data/llm_exports/{branch_id}/node_cards.jsonl
+data/llm_exports/{branch_id}/edge_cards.jsonl
+data/llm_exports/{branch_id}/operation_cards.jsonl
+```
+
+### 10.12 Schema Validation Contract
+
+Validation should treat the following as blockers before acceptance:
+
+- Missing branch mode or branch purpose.
+- Missing transform scope.
+- Missing operation type.
+- Missing split/merge theory for split or merge operations.
+- Output node id collision within a branch.
+- Missing lineage or hypothesis marking for an accepted output node.
+- Invalid dependency that cannot be repaired by the LLM.
+- LLM-dependent split edge assignment that has not been stored canonically.
+
+Validation should treat the following as warnings unless branch mode escalates severity:
+
+- Large operation batches.
+- Merge operations with no edge mappings.
+- Low-confidence LLM assignments.
+- Dropped lower-confidence conflict edges retained only as lineage evidence.
+- Missing optional human-authored rationale.
+
+## 11. Recommended Dependencies
 
 ### Recommended Stack
 
@@ -422,15 +952,15 @@ Clicking a transformed node or operation should show:
 | NetworkX | BSD-3-Clause | Python graph analysis prototype | Great for algorithms and experiments | Not runtime UI infrastructure |
 | Neo4j Community | GPLv3 | Graph database alternative | Strong graph query model | GPL and open-core tradeoffs; branch/version diff workflow is heavier |
 
-## 10. Invariants
+## 12. Invariants
 
 These invariants protect branch meaning rather than preserving the old graph at all costs.
 
-### 10.1 Canonical Derivation Invariant
+### 12.1 Canonical Derivation Invariant
 
 Canonical graph state is derived from source graph plus immutable accepted transform operations. UI layout and canvas edits are non-canonical metadata.
 
-### 10.2 Lineage Invariant
+### 12.2 Lineage Invariant
 
 Every accepted new node has at least one of:
 
@@ -440,7 +970,7 @@ Every accepted new node has at least one of:
 
 No mystery nodes are allowed.
 
-### 10.3 Operation Typing Invariant
+### 12.3 Operation Typing Invariant
 
 Every split or merge declares its theory.
 
@@ -457,7 +987,7 @@ Examples:
 - controversy
 - anti_merge
 
-### 10.4 Branch Mode Invariant
+### 12.4 Branch Mode Invariant
 
 Every branch declares a mode:
 
@@ -468,7 +998,7 @@ Every branch declares a mode:
 
 Validation severity depends on branch mode.
 
-### 10.5 Branch Purpose Invariant
+### 12.5 Branch Purpose Invariant
 
 Every branch has an explicit purpose statement before transform acceptance.
 
@@ -480,33 +1010,33 @@ Find a more teachable ontology for agentic AI concepts.
 
 Exploratory transformations without a stated purpose become visually interesting but impossible to judge.
 
-### 10.6 Deterministic Replay Invariant
+### 12.6 Deterministic Replay Invariant
 
-`SourceGraph + AcceptedOps + BranchPointer` must regenerate the same branch graph.
+`SourceGraph + AcceptedOps + BranchPointer` must regenerate the same semantic branch graph.
 
-Layout is excluded from this invariant.
+Layout, lineage rendering, and loss receipts are excluded from strict replay equality. LLM-dependent materialization choices, such as split edge assignment, must be run once at acceptance and stored as canonical data rather than recomputed during replay.
 
-### 10.7 Non-Canonical UI Invariant
+### 12.7 Non-Canonical UI Invariant
 
 Dragging, clustering, hiding, zooming, and coloring never change semantic state.
 
-### 10.8 Hypothesis Marking Invariant
+### 12.8 Hypothesis Marking Invariant
 
 Any LLM-invented node or edge without source ancestry is marked as hypothesis, not fact.
 
-### 10.9 Acceptance Invariant
+### 12.9 Acceptance Invariant
 
 LLM proposals are drafts until user/system acceptance creates immutable transform operations.
 
-### 10.10 Loss Receipt Invariant
+### 12.10 Loss Receipt Invariant
 
-Dropped nodes and edges are recorded, but blocking depends on branch mode.
+Dropped nodes are recorded as loss receipts, but blocking depends on branch mode. Dropped or unmapped edges are retained as lineage-only evidence or operation metadata, not loss receipts.
 
-### 10.11 No Silent Overwrite Invariant
+### 12.11 No Silent Overwrite Invariant
 
 Corrections create new operations. Old accepted operations are not mutated.
 
-### 10.12 Scope Invariant
+### 12.12 Scope Invariant
 
 Every transform declares input scope:
 
@@ -516,7 +1046,7 @@ Every transform declares input scope:
 - full graph
 - branch
 
-## 11. State Machine
+## 13. State Machine
 
 The system moves from an initial graph to a proposed graph through explicit states.
 
@@ -616,11 +1146,13 @@ This is the dangerous transition because drafts become branch history.
 
 ### S9: BranchMaterialized
 
-The branch graph is regenerated from:
+The branch graph is materialized from:
 
 ```text
 SourceGraph + AcceptedOps + BranchPointer
 ```
+
+In the MVP, materialization must reproduce an identical semantic graph on replay. Layout, lineage rendering, and loss receipt rendering may differ.
 
 ### S10: BranchCompared
 
@@ -631,7 +1163,7 @@ The materialized branch can be compared against:
 - sibling branch
 - previous accepted state
 
-## 12. State Transitions
+## 14. State Transitions
 
 ```text
 S0 SourceGraphLoaded
@@ -654,7 +1186,7 @@ rescope -> S2 TransformScopeSelected
 change mode -> S1 BranchInitialized or S5 DraftOpsValidated
 ```
 
-## 13. MVP Scope
+## 15. MVP Scope
 
 The MVP should test the smallest complete loop:
 
@@ -669,9 +1201,9 @@ The MVP should test the smallest complete loop:
 9. UI renders separate synchronized force and lineage views.
 10. User accepts or rejects proposed operations.
 11. Accepted operations materialize a branch.
-12. Branch can be deterministically replayed.
+12. Branch can be reconstructed or approximated from recorded decisions and lineage.
 
-## 14. First Verification
+## 16. First Verification
 
 The first verification should answer:
 
@@ -687,10 +1219,10 @@ Success indicators:
 - Each new node has lineage or is marked as hypothesis.
 - Each split/merge has a declared theory.
 - Losses are visible as receipts, not blockers.
-- Branch can be replayed deterministically.
+- Branch can be replayed at the decision level, preserving accepted split/merge decisions, lineage, rationale, and loss receipts.
 - The new ontology exposes at least one useful abstraction, bridge, teaching unit, or causal decomposition that was difficult to see in the original graph.
 
-## 15. Open Design Questions
+## 17. Open Design Questions
 
 1. What exact scoring rubric should measure `insight_gain`?
 2. Should pedagogical mode be a branch mode, a scoring overlay, or both?
