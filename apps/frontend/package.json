@@ -4,9 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "typecheck": "node --check src/index.js",
-    "lint": "node --check src/index.js",
-    "test": "node --test"
+    "start": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@know-grow/shared": "workspace:^",
+    "@vitejs/plugin-react": "^6.0.2",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "vite": "^8.0.14"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3"
   }
 }

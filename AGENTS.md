@@ -6,6 +6,7 @@ Keep this file brief and operational. Status and progress belong in IMPLEMENTATI
 
 - Start all workspace apps: `pnpm start` or `pnpm dev`
 - Backend only: `pnpm --filter @know-grow/backend start`
+- Frontend only: `pnpm --filter @know-grow/frontend start`
 
 ## Validation
 

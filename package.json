@@ -11,7 +11,7 @@
     "test": "pnpm -r test"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
