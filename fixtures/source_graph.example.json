@@ -1,0 +1,190 @@
+{
+  "graphId": "source-example",
+  "name": "Example Agentic AI Concept Graph",
+  "stateType": "source",
+  "nodes": [
+    {
+      "id": "prompting",
+      "label": "Prompting",
+      "type": "concept",
+      "origin": "source",
+      "notes": "How instructions shape model behavior.",
+      "properties": {}
+    },
+    {
+      "id": "persona",
+      "label": "Persona",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Role framing used in prompts.",
+      "properties": {}
+    },
+    {
+      "id": "few-shot-examples",
+      "label": "Few-Shot Examples",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Examples that steer model output format and reasoning.",
+      "properties": {}
+    },
+    {
+      "id": "tool-use",
+      "label": "Tool Use",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Letting an agent call external functions or services.",
+      "properties": {}
+    },
+    {
+      "id": "retrieval",
+      "label": "Retrieval",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Fetching relevant context before generation.",
+      "properties": {}
+    },
+    {
+      "id": "agent-loop",
+      "label": "Agent Loop",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Iterative observe, reason, act, and evaluate loop.",
+      "properties": {}
+    },
+    {
+      "id": "evaluation",
+      "label": "Evaluation",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Measuring whether the system behaves correctly.",
+      "properties": {}
+    },
+    {
+      "id": "reliability",
+      "label": "Reliability",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Consistency and trustworthiness of agent behavior.",
+      "properties": {}
+    },
+    {
+      "id": "guardrails",
+      "label": "Guardrails",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Constraints and checks that reduce unsafe or unwanted behavior.",
+      "properties": {}
+    },
+    {
+      "id": "memory",
+      "label": "Memory",
+      "type": "concept",
+      "origin": "source",
+      "notes": "Stored context used across turns or tasks.",
+      "properties": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-prompting-persona",
+      "source": "prompting",
+      "target": "persona",
+      "label": "uses",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-prompting-few-shot",
+      "source": "prompting",
+      "target": "few-shot-examples",
+      "label": "uses",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-prompting-agent-loop",
+      "source": "prompting",
+      "target": "agent-loop",
+      "label": "guides",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-agent-loop-tool-use",
+      "source": "agent-loop",
+      "target": "tool-use",
+      "label": "orchestrates",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-agent-loop-retrieval",
+      "source": "agent-loop",
+      "target": "retrieval",
+      "label": "may_include",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-agent-loop-memory",
+      "source": "agent-loop",
+      "target": "memory",
+      "label": "may_use",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-retrieval-memory",
+      "source": "retrieval",
+      "target": "memory",
+      "label": "reads_from",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-evaluation-reliability",
+      "source": "evaluation",
+      "target": "reliability",
+      "label": "supports",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-guardrails-reliability",
+      "source": "guardrails",
+      "target": "reliability",
+      "label": "improves",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-tool-use-guardrails",
+      "source": "tool-use",
+      "target": "guardrails",
+      "label": "requires",
+      "origin": "source",
+      "properties": {}
+    },
+    {
+      "id": "edge-evaluation-guardrails",
+      "source": "evaluation",
+      "target": "guardrails",
+      "label": "tests",
+      "origin": "source",
+      "properties": {}
+    }
+  ],
+  "layout": {
+    "prompting": { "x": 0, "y": 0 },
+    "persona": { "x": -160, "y": -80 },
+    "few-shot-examples": { "x": -160, "y": 80 },
+    "agent-loop": { "x": 160, "y": 0 },
+    "tool-use": { "x": 340, "y": -100 },
+    "retrieval": { "x": 340, "y": 0 },
+    "memory": { "x": 520, "y": 40 },
+    "evaluation": { "x": 160, "y": 220 },
+    "guardrails": { "x": 340, "y": 180 },
+    "reliability": { "x": 520, "y": 220 }
+  },
+  "updatedAt": "2026-05-24T00:00:00.000Z"
+}

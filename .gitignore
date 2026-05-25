@@ -13,6 +13,7 @@ __pycache__/
 .env
 
 # Generated data artifacts
+.data/
 *.duckdb
 *.parquet
 *.sqlite
