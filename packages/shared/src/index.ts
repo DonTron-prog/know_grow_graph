@@ -157,6 +157,33 @@ export const actionSummarySchema = z.object({
   warnings: z.array(z.string())
 });
 
+export const apiErrorSchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    details: z.unknown().optional()
+  })
+});
+
+export const healthResponseSchema = z.object({
+  ok: z.boolean(),
+  version: z.string(),
+  piCoderAvailable: z.boolean()
+});
+
+export const replaceWorkingGraphRequestSchema = z.object({
+  graph: graphStateSchema
+});
+
+export const replaceWorkingGraphResponseSchema = z.object({
+  graph: graphStateSchema,
+  validationResults: z.array(validationResultSchema)
+});
+
+export const listSnapshotsResponseSchema = z.object({
+  snapshots: z.array(snapshotMetaSchema)
+});
+
 export type GraphNode = z.infer<typeof graphNodeSchema>;
 export type GraphEdge = z.infer<typeof graphEdgeSchema>;
 export type GraphState = z.infer<typeof graphStateSchema>;
@@ -166,6 +193,11 @@ export type GraphPatchOperation = z.infer<typeof graphPatchOperationSchema>;
 export type GraphPatch = z.infer<typeof graphPatchSchema>;
 export type ValidationResult = z.infer<typeof validationResultSchema>;
 export type ActionSummary = z.infer<typeof actionSummarySchema>;
+export type ApiError = z.infer<typeof apiErrorSchema>;
+export type HealthResponse = z.infer<typeof healthResponseSchema>;
+export type ReplaceWorkingGraphRequest = z.infer<typeof replaceWorkingGraphRequestSchema>;
+export type ReplaceWorkingGraphResponse = z.infer<typeof replaceWorkingGraphResponseSchema>;
+export type ListSnapshotsResponse = z.infer<typeof listSnapshotsResponseSchema>;
 
 export function graphMetaFromState(graph: GraphState, readOnly = graph.stateType === "source"): GraphMeta {
   return {

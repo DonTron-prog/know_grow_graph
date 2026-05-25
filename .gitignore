@@ -21,6 +21,9 @@ __pycache__/
 
 # Generated data artifacts
 .data/
+.ralph-runner/
+.pi/
+ralph-context/
 *.duckdb
 *.parquet
 *.sqlite

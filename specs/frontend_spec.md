@@ -4,7 +4,7 @@
 
 This specification defines the first frontend for the Snapshot Multi-View Knowledge Graph Workbench.
 
-The frontend is a proof-of-concept interface. It should demonstrate that Pi Coder can transform a knowledge graph from human direction while keeping the graph visualization central.
+The frontend is a proof-of-concept interface. It should demonstrate that Pi Coder can transform a knowledge graph from human direction while keeping the graph visualization central. Pi Coder may operate either by returning a typed patch or, in local direct JSON mode, by editing the shared mutable graph JSON that the backend then reloads and validates.
 
 ## 2. Screen Structure
 
@@ -64,7 +64,7 @@ Required behaviours:
 - multi-select nodes
 - clear selection by clicking background
 - emit selection events to InspectorPanel
-- accept graph updates from direct manipulation and Pi Coder patches
+- accept graph updates from direct manipulation, Pi Coder patches, and validated Pi direct JSON edits
 - highlight recently changed elements
 
 Required node fields:
@@ -168,9 +168,9 @@ Required elements:
 - scrollable conversation history
 - user prompt input
 - submit on Enter or send control
-- status display: idle, thinking, validating, applying, failed, complete
+- status display: idle, thinking, validating, applying/reloading, failed, complete
 
-The Chat tab sends the current graph context and user instruction to Pi Coder.
+The Chat tab sends the current graph context and user instruction to Pi Coder. It may use patch mode or direct JSON mode. If a mode control is exposed, keep it inside the Pi Panel rather than adding another top toolbar primary action.
 
 Minimal prompt context should include:
 
@@ -182,7 +182,7 @@ Minimal prompt context should include:
 
 #### Actions Tab
 
-The Actions tab displays the human-readable result of the most recent Pi Coder proposal or applied patch.
+The Actions tab displays the human-readable result of the most recent Pi Coder proposal, applied patch, or validated direct JSON edit.
 
 Action summary model:
 
@@ -210,6 +210,7 @@ The Raw tab displays developer details:
 
 - raw Pi Coder response
 - parsed graph patch
+- direct JSON edit/reload result when direct mode is used
 - validation results
 - application result
 - error stack or error message when available
@@ -218,7 +219,7 @@ Raw is for debugging. It should not be the default user view.
 
 ## 4. Graph Patch Contract
 
-Pi Coder should return a typed patch. The frontend or backend validates it before applying it.
+Pi Coder should return a typed patch in the preferred/default mode. The frontend or backend validates it before applying it. In local direct JSON mode, Pi may instead edit the shared `working_graph.json` file; the backend must reload and validate that full graph before the frontend accepts it.
 
 ### 4.1 Patch Shape
 
@@ -330,6 +331,7 @@ type AppState = {
   redoStack: GraphState[];
   piMessages: PiMessage[];
   lastPatch?: GraphPatch;
+  lastPiMode?: 'patch' | 'direct_json';
   lastActionSummary?: ActionSummary;
   validationResults?: ValidationResult[];
 };
@@ -346,9 +348,10 @@ Rules:
 - The frontend owns `AppState`, including `undoStack` and `redoStack`.
 - The backend persists only the latest valid working graph, source graph, and snapshots.
 - Before any user-applied mutation, the frontend pushes the current `workingGraph` onto `undoStack` and clears `redoStack`.
-- A mutation may be a toolbar operation, inspector edit, snapshot load, source revert, or applied Pi Coder patch.
+- A mutation may be a toolbar operation, inspector edit, snapshot load, source revert, applied Pi Coder patch, or validated Pi direct JSON edit.
 - The frontend sends mutations to the backend as `GraphPatch` operations when possible.
-- The backend validates, applies, persists, and returns the updated `GraphState`.
+- For direct JSON mode, the frontend pushes the prior graph to `undoStack` before invoking Pi, then accepts only the backend-reloaded validated `GraphState`.
+- The backend validates, applies or reloads, persists, and returns the updated `GraphState`.
 - Undo pops a previous `GraphState` from `undoStack`, pushes the current graph onto `redoStack`, and replaces the backend working graph with that previous state.
 - Redo does the reverse.
 - Undo and redo must not require backend action replay.
@@ -377,9 +380,11 @@ Revert to source replaces the working graph with a fresh copy of the immutable s
 
 ## 7. Pi Coder Integration
 
-The frontend should call a Pi Coder endpoint or local bridge with:
+The frontend should call the backend Pi Coder endpoint with:
 
 ```ts
+type PiEditMode = 'patch' | 'direct_json';
+
 type PiCoderRequest = {
   instruction: string;
   selectedNodeIds: string[];
@@ -389,6 +394,7 @@ type PiCoderRequest = {
     edges: GraphEdge[];
   };
   snapshot?: SnapshotMeta;
+  mode?: PiEditMode; // default: 'patch'
 };
 ```
 
@@ -397,13 +403,21 @@ Expected response:
 ```ts
 type PiCoderResponse = {
   message: string;
+  mode: PiEditMode;
   patch?: GraphPatch;
+  graph?: GraphState; // returned after successful direct_json edit
+  snapshots?: SnapshotMeta[]; // returned if snapshot metadata changed
   actionSummary?: ActionSummary;
   warnings?: string[];
+  validationResults?: ValidationResult[];
+  changedElementIds?: string[];
+  rawPiOutput?: unknown;
 };
 ```
 
-If Pi Coder returns plain text without a patch, the Chat tab displays it but the graph is not mutated.
+If Pi Coder returns plain text without a patch in patch mode, the Chat tab displays it but the graph is not mutated.
+
+If direct JSON mode succeeds, the backend returns the reloaded validated `GraphState`; the frontend replaces `workingGraph`, updates snapshot metadata if returned, records changed element IDs, and refreshes the canvas. If direct JSON validation fails, the frontend keeps the last valid graph and displays the backend error in Raw and StatusBar.
 
 ## 8. Error Handling
 
@@ -412,6 +426,8 @@ Common errors:
 - Pi Coder timeout
 - invalid JSON patch
 - patch validation failure
+- invalid direct JSON edit from Pi
+- stale graph reload after direct file edit
 - save snapshot failure
 - load snapshot failure
 - graph render failure
@@ -445,8 +461,9 @@ Example:
 6. Add PiPanel Chat with mocked Pi Coder response.
 7. Add GraphPatch validation.
 8. Apply Pi Coder graph patches to the working graph.
-9. Add Actions and Raw tabs.
-10. Add visual highlights for recent changes.
+9. Add direct JSON mode handling for backend-reloaded Pi edits.
+10. Add Actions and Raw tabs.
+11. Add visual highlights for recent changes.
 
 ## 11. Acceptance Criteria
 
@@ -459,6 +476,7 @@ The frontend is acceptable when:
 - revert to source works
 - Pi Coder can return a typed patch
 - valid Pi Coder patches update the graph
-- invalid patches do not corrupt graph state
+- Pi direct JSON edits can update the graph after backend reload/validation
+- invalid patches or invalid direct JSON edits do not corrupt graph state
 - Actions summarizes Pi Coder changes
-- Raw exposes patch and validation details
+- Raw exposes patch, direct edit, and validation details
