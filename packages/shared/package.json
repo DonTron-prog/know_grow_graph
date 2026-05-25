@@ -6,10 +6,13 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
   "scripts": {
-    "start": "node -e \"console.log('shared package scaffold ready')\"",
-    "typecheck": "node --check src/index.js",
-    "lint": "node --check src/index.js",
-    "test": "node --test"
+    "start": "node -e \"console.log('shared package ready')\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
   }
 }
