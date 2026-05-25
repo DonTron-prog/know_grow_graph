@@ -1,0 +1,15 @@
+{
+  "name": "@know-grow/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "node -e \"console.log('shared package scaffold ready')\"",
+    "typecheck": "node --check src/index.js",
+    "lint": "node --check src/index.js",
+    "test": "node --test"
+  }
+}

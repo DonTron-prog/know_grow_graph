@@ -1,0 +1,16 @@
+{
+  "name": "know-grow-graph",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "start": "pnpm -r --parallel start",
+    "dev": "pnpm -r --parallel start",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

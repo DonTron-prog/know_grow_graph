@@ -6,6 +6,13 @@ applied_agentic_ai_vault/
 .vscode/
 .idea/
 
+# Node/package artifacts
+node_modules/
+dist/
+build/
+coverage/
+.pnpm-store/
+
 # Python/local runtime noise
 __pycache__/
 *.py[cod]
