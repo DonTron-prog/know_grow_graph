@@ -4,9 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "typecheck": "node --check src/index.js",
-    "lint": "node --check src/index.js",
-    "test": "node --test"
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@know-grow/shared": "workspace:^",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5"
   }
 }
