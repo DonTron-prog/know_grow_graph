@@ -88,6 +88,9 @@ test("frontend API client sends mutation requests to implemented backend endpoin
     if (String(input).endsWith("/pi/chat")) {
       return jsonResponse({ message: "Pi proposed a patch.", mode: "patch", patch: { patchId: "patch-pi", instruction: "Add a concept", summary: "Pi patch", operations: [] }, actionSummary: emptyActionSummary("pi"), warnings: [], validationResults: [] });
     }
+    if (String(input).endsWith("/pi/direct-edit")) {
+      return jsonResponse({ message: "Pi direct edit accepted.", mode: "direct_json", graph: sampleGraph, snapshots: [], actionSummary: emptyActionSummary("direct"), warnings: [], validationResults: [], changedElementIds: ["node-1"], rawPiOutput: { source: "test" } });
+    }
 
     return jsonResponse({ error: { code: "not_found", message: "Missing" } }, 404);
   };
@@ -101,6 +104,7 @@ test("frontend API client sends mutation requests to implemented backend endpoin
   await apiClient.revertToSource();
   await apiClient.applyPatch(patch);
   await apiClient.piChat({ instruction: "Add a concept", selectedNodeIds: ["node-1"], selectedEdgeIds: [], graph: { nodes: sampleGraph.nodes, edges: sampleGraph.edges }, mode: "patch" });
+  await apiClient.piDirectEdit({ instruction: "Edit JSON", selectedNodeIds: [], selectedEdgeIds: [], graph: { nodes: sampleGraph.nodes, edges: sampleGraph.edges }, mode: "direct_json" });
 
   assert.deepEqual(requests.map((request) => [request.method, request.url]), [
     ["PUT", "http://backend.test/api/working/graph"],
@@ -109,11 +113,13 @@ test("frontend API client sends mutation requests to implemented backend endpoin
     ["POST", "http://backend.test/api/snapshots/snap-1/duplicate"],
     ["POST", "http://backend.test/api/working/revert-to-source"],
     ["POST", "http://backend.test/api/patch/apply"],
-    ["POST", "http://backend.test/api/pi/chat"]
+    ["POST", "http://backend.test/api/pi/chat"],
+    ["POST", "http://backend.test/api/pi/direct-edit"]
   ]);
   assert.deepEqual(requests[0]?.body, { graph: sampleGraph });
   assert.deepEqual(requests[5]?.body, { patch });
   assert.deepEqual(requests[6]?.body, { instruction: "Add a concept", selectedNodeIds: ["node-1"], selectedEdgeIds: [], graph: { nodes: sampleGraph.nodes, edges: sampleGraph.edges }, mode: "patch" });
+  assert.deepEqual(requests[7]?.body, { instruction: "Edit JSON", selectedNodeIds: [], selectedEdgeIds: [], graph: { nodes: sampleGraph.nodes, edges: sampleGraph.edges }, mode: "direct_json" });
 });
 
 test("frontend API client preserves backend ApiError details", async () => {

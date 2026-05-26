@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import type { ActionSummary, GraphEdge, GraphMeta, GraphNode, GraphPatch, GraphState, SnapshotMeta } from "@know-grow/shared";
+import type { ActionSummary, GraphEdge, GraphMeta, GraphNode, GraphPatch, GraphState, PiEditMode, SnapshotMeta } from "@know-grow/shared";
 import { ApiClientError, type FrontendApiClient } from "./api.js";
 import {
   addEdgeToGraph,
@@ -64,6 +64,7 @@ export function App({ apiClient }: AppProps) {
   const [piPrompt, setPiPrompt] = useState("");
   const [piMessages, setPiMessages] = useState<PiMessage[]>([]);
   const [pendingPiPatch, setPendingPiPatch] = useState<GraphPatch | null>(null);
+  const [piMode, setPiMode] = useState<PiEditMode>("patch");
   const [inspectorResetVersion, setInspectorResetVersion] = useState(0);
   const graphRef = useRef<GraphState | null>(null);
   const mutationQueueRef = useRef(Promise.resolve());
@@ -391,22 +392,43 @@ export function App({ apiClient }: AppProps) {
   async function handleSendPiPrompt(): Promise<void> {
     if (!data) return;
     const instruction = piPrompt.trim();
-    if (!instruction) return;
+    if (!instruction || piStatus === "thinking" || piStatus === "applying/reloading") return;
 
     setPiStatus("thinking");
     setPiMessages((messages) => [...messages, { role: "user", content: instruction }]);
     setPiPrompt("");
     try {
-      const response = await apiClient.piChat({
+      const request = {
         instruction,
         selectedNodeIds: selection.nodeIds,
         selectedEdgeIds: selection.edgeIds,
         graph: {
           nodes: data.workingGraph.nodes,
           edges: data.workingGraph.edges
-        },
-        mode: "patch"
-      });
+        }
+      };
+
+      if (piMode === "direct_json") {
+        setPiStatus("applying/reloading");
+        const response = await apiClient.piDirectEdit({ ...request, mode: "direct_json" });
+        setPiMessages((messages) => [...messages, { role: "assistant", content: response.message }]);
+        setPendingPiPatch(null);
+        if (response.snapshots) {
+          setData((current) => (current ? { ...current, snapshots: response.snapshots ?? current.snapshots } : current));
+        }
+        acceptWorkingGraph(response.graph, {
+          pushUndo: true,
+          changedIds: response.changedElementIds,
+          actionSummary: response.actionSummary ?? null,
+          raw: response,
+          unsaved: true
+        });
+        setSelection(EMPTY_SELECTION);
+        setActivePiTab("actions");
+        return;
+      }
+
+      const response = await apiClient.piChat({ ...request, mode: "patch" });
       setPiMessages((messages) => [...messages, { role: "assistant", content: response.message }]);
       setPendingPiPatch(response.patch ?? null);
       setLastActionSummary(response.actionSummary ?? null);
@@ -463,7 +485,7 @@ export function App({ apiClient }: AppProps) {
       <section className="main-grid" aria-label="Workbench regions">
         <InspectorPanel key={inspectorResetVersion} selection={selection} graph={data?.workingGraph} nodes={selectedNodes} edges={selectedEdges} unsavedChanges={unsavedChanges} activeSnapshotName={activeSnapshotName} onNodeUpdate={handleNodeUpdate} onEdgeUpdate={handleEdgeUpdate} />
         <GraphCanvas graph={data?.workingGraph} status={status} selected={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} onSelect={setSelection} onLayoutChange={handleLayoutChange} />
-        <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} piStatus={piStatus} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} actionSummary={lastActionSummary} rawDetails={rawDetails} piPrompt={piPrompt} piMessages={piMessages} pendingPiPatch={pendingPiPatch} onPiPromptChange={setPiPrompt} onSendPiPrompt={handleSendPiPrompt} onApplyPiPatch={handleApplyPiPatch} />
+        <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} piStatus={piStatus} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} actionSummary={lastActionSummary} rawDetails={rawDetails} piPrompt={piPrompt} piMessages={piMessages} pendingPiPatch={pendingPiPatch} piMode={piMode} onPiModeChange={setPiMode} onPiPromptChange={setPiPrompt} onSendPiPrompt={handleSendPiPrompt} onApplyPiPatch={handleApplyPiPatch} />
       </section>
       <StatusBar
         status={status}
@@ -941,6 +963,8 @@ function PiPanel({
   piPrompt,
   piMessages,
   pendingPiPatch,
+  piMode,
+  onPiModeChange,
   onPiPromptChange,
   onSendPiPrompt,
   onApplyPiPatch
@@ -958,6 +982,8 @@ function PiPanel({
   piPrompt: string;
   piMessages: PiMessage[];
   pendingPiPatch: GraphPatch | null;
+  piMode: PiEditMode;
+  onPiModeChange: (mode: PiEditMode) => void;
   onPiPromptChange: (value: string) => void;
   onSendPiPrompt: () => void;
   onApplyPiPatch: () => void;
@@ -985,6 +1011,13 @@ function PiPanel({
               ))
             )}
           </div>
+          <label className="pi-mode-control">
+            Mode
+            <select aria-label="Pi edit mode" value={piMode} onChange={(event) => onPiModeChange(event.currentTarget.value as PiEditMode)}>
+              <option value="patch">Patch proposal</option>
+              <option value="direct_json">Direct JSON edit</option>
+            </select>
+          </label>
           <textarea
             value={piPrompt}
             onChange={(event) => onPiPromptChange(event.target.value)}
@@ -999,8 +1032,8 @@ function PiPanel({
             aria-label="Pi prompt"
           />
           <div className="pi-controls">
-            <button type="button" onClick={onSendPiPrompt} disabled={!graph || !piPrompt.trim() || piStatus === "thinking"}>Send to Pi</button>
-            <button type="button" onClick={onApplyPiPatch} disabled={!pendingPiPatch || piStatus === "thinking"}>Apply latest Pi patch</button>
+            <button type="button" onClick={onSendPiPrompt} disabled={!graph || !piPrompt.trim() || piStatus === "thinking" || piStatus === "applying/reloading"}>Send to Pi</button>
+            <button type="button" onClick={onApplyPiPatch} disabled={piMode !== "patch" || !pendingPiPatch || piStatus === "thinking"}>Apply latest Pi patch</button>
           </div>
           <span>Pi status: {piStatus}</span>
         </div>
@@ -1008,7 +1041,7 @@ function PiPanel({
       {activeTab === "actions" ? (
         <div className="tab-panel">
           {actionSummary ? <ActionSummaryView actionSummary={actionSummary} /> : <EmptyState title="No proposed actions" body="Patch summaries and validation warnings appear here after toolbar, inspector, snapshot, or Pi mutations." />}
-          {pendingPiPatch ? <button type="button" onClick={onApplyPiPatch} disabled={piStatus === "thinking"}>Apply latest Pi patch</button> : null}
+          {pendingPiPatch ? <button type="button" onClick={onApplyPiPatch} disabled={piMode !== "patch" || piStatus === "thinking" || piStatus === "applying/reloading"}>Apply latest Pi patch</button> : null}
         </div>
       ) : null}
       {activeTab === "raw" ? (

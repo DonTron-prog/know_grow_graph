@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { test } from "node:test";
-import { createPiAgentServer, createPatchResponse } from "../src/index.js";
+import { applyDirectJsonEdit, createPiAgentServer, createPatchResponse } from "../src/index.js";
 
 test("createPatchResponse returns a patch-mode proposal without mutating input", () => {
   const response = createPatchResponse({
@@ -16,6 +19,34 @@ test("createPatchResponse returns a patch-mode proposal without mutating input",
   assert.match(response.patch.patchId, /^patch-/);
   assert.deepEqual(response.patch.operations.map((operation) => operation.op), ["add_node", "add_edge"]);
   assert.equal(response.patch.operations[1].source, "n1");
+});
+
+test("applyDirectJsonEdit mutates the shared working graph file", async () => {
+  const dataDir = await mkdtemp(resolve(tmpdir(), "know-grow-pi-agent-"));
+  const previousGraphDataDir = process.env.GRAPH_DATA_DIR;
+  process.env.GRAPH_DATA_DIR = dataDir;
+  const graph = {
+    graphId: "working-test",
+    name: "Working Test",
+    stateType: "working",
+    nodes: [{ id: "n1", label: "One", type: "concept", origin: "source" }],
+    edges: []
+  };
+  await writeFile(resolve(dataDir, "working_graph.json"), JSON.stringify(graph), "utf8");
+  try {
+    const response = await applyDirectJsonEdit({ instruction: "Add direct", selectedNodeIds: ["n1"], selectedEdgeIds: [] });
+    const persisted = JSON.parse(await readFile(resolve(dataDir, "working_graph.json"), "utf8"));
+
+    assert.equal(response.mode, "direct_json");
+    assert.equal(persisted.nodes.length, 2);
+    assert.equal(persisted.edges[0].source, "n1");
+  } finally {
+    if (previousGraphDataDir === undefined) {
+      delete process.env.GRAPH_DATA_DIR;
+    } else {
+      process.env.GRAPH_DATA_DIR = previousGraphDataDir;
+    }
+  }
 });
 
 test("pi-agent HTTP bridge exposes health and patch chat", async () => {

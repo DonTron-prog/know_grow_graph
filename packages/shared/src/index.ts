@@ -253,6 +253,10 @@ export const piCoderRequestSchema = z.object({
   mode: piEditModeSchema.optional()
 });
 
+export const piDirectEditRequestSchema = piCoderRequestSchema.extend({
+  mode: z.literal("direct_json").optional()
+});
+
 export const piCoderResponseSchema = z.object({
   message: z.string(),
   mode: piEditModeSchema,
@@ -263,6 +267,18 @@ export const piCoderResponseSchema = z.object({
   warnings: z.array(z.string()).optional(),
   validationResults: z.array(validationResultSchema).optional(),
   changedElementIds: z.array(z.string()).optional(),
+  rawPiOutput: z.unknown().optional()
+});
+
+export const piDirectEditResponseSchema = z.object({
+  message: z.string(),
+  mode: z.literal("direct_json"),
+  graph: graphStateSchema,
+  snapshots: z.array(snapshotMetaSchema).optional(),
+  actionSummary: actionSummarySchema.optional(),
+  warnings: z.array(z.string()).optional(),
+  validationResults: z.array(validationResultSchema),
+  changedElementIds: z.array(z.string()),
   rawPiOutput: z.unknown().optional()
 });
 
@@ -293,7 +309,9 @@ export type DuplicateSnapshotResponse = z.infer<typeof duplicateSnapshotResponse
 export type RevertToSourceResponse = z.infer<typeof revertToSourceResponseSchema>;
 export type PiEditMode = z.infer<typeof piEditModeSchema>;
 export type PiCoderRequest = z.infer<typeof piCoderRequestSchema>;
+export type PiDirectEditRequest = z.infer<typeof piDirectEditRequestSchema>;
 export type PiCoderResponse = z.infer<typeof piCoderResponseSchema>;
+export type PiDirectEditResponse = z.infer<typeof piDirectEditResponseSchema>;
 
 export function graphMetaFromState(graph: GraphState, readOnly = graph.stateType === "source"): GraphMeta {
   return {

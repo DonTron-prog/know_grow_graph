@@ -18,6 +18,8 @@ import {
   type LoadSnapshotResponse,
   type PiCoderRequest,
   type PiCoderResponse,
+  type PiDirectEditRequest,
+  type PiDirectEditResponse,
   type ReplaceWorkingGraphResponse,
   type RevertToSourceResponse,
   type SnapshotMeta
@@ -149,11 +151,52 @@ test("App-level Pi chat proposes a patch and applies it only after confirmation"
     assert.equal(harness.api.graph.nodes.length, 2, "Pi proposal must not mutate before apply");
     assert.match(document.body.textContent ?? "", /Mock Pi patch/);
 
+    await clickButton("Chat");
+    await changeSelect(document.querySelector("select[aria-label='Pi edit mode']") as HTMLSelectElement, "direct_json");
+    await clickButton("Actions");
+    const staleApplyButton = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent === "Apply latest Pi patch") as HTMLButtonElement | undefined;
+    assert.equal(staleApplyButton?.disabled, true, "stale patch apply must be disabled in direct JSON mode");
+    await clickButton("Chat");
+    await changeSelect(document.querySelector("select[aria-label='Pi edit mode']") as HTMLSelectElement, "patch");
+
     harness.confirmResponses.push(true);
     await clickButton("Apply latest Pi patch");
     await waitFor(() => assert.equal(harness.api.applyPatchCalls.length, 1));
     assert.ok(harness.api.graph.nodes.some((node) => node.id === "pi-review"));
     assert.match(harness.statusText(), /Pi: complete/);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test("App-level Pi direct JSON mode accepts backend-reloaded valid graph and preserves invalid failures", async () => {
+  const harness = await renderHarness();
+  try {
+    const modeSelect = document.querySelector("select[aria-label='Pi edit mode']") as HTMLSelectElement;
+    await changeSelect(modeSelect, "direct_json");
+    harness.api.holdNextDirectEdit = true;
+    const prompt = document.querySelector("textarea[aria-label='Pi prompt']") as HTMLTextAreaElement;
+    await changeTextarea(prompt, "Edit graph JSON directly");
+    await clickButton("Send to Pi");
+
+    await waitFor(() => assert.equal(harness.api.piDirectEditCalls.length, 1));
+    assert.equal(harness.api.piDirectEditCalls[0]?.mode, "direct_json");
+    await changeTextarea(prompt, "Duplicate submit should be ignored");
+    await waitFor(() => assert.match(document.body.textContent ?? "", /Pi status: applying\/reloading/));
+    const sendButton = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent === "Send to Pi") as HTMLButtonElement | undefined;
+    assert.equal(sendButton?.disabled, true, "Send must be disabled while direct JSON reload is in flight");
+    assert.equal(harness.api.piDirectEditCalls.length, 1, "duplicate submit must be ignored while direct JSON reload is in flight");
+    await act(async () => harness.api.releaseDirectEdit?.());
+    await waitFor(() => assert.ok(harness.api.graph.nodes.some((node) => node.id === "direct-review")));
+    assert.match(document.body.textContent ?? "", /Applied Pi direct JSON edit/);
+    assert.match(harness.statusText(), /Unsaved changes: yes/);
+
+    harness.api.rejectNextDirectEdit = new ApiClientError("Invalid direct edit", 422, "invalid_direct_json_edit", { validationResults: [] });
+    await clickButton("Chat");
+    await changeTextarea(document.querySelector("textarea[aria-label='Pi prompt']") as HTMLTextAreaElement, "Break graph JSON");
+    await clickButton("Send to Pi");
+    await waitFor(() => assert.match(harness.statusText(), /invalid_direct_json_edit: Invalid direct edit/));
+    assert.equal(harness.api.graph.nodes.filter((node) => node.id === "direct-review").length, 1);
   } finally {
     await harness.cleanup();
   }
@@ -261,6 +304,10 @@ class MockApiClient implements FrontendApiClient {
   replaceCalls: GraphState[] = [];
   applyPatchCalls: GraphPatch[] = [];
   piChatCalls: PiCoderRequest[] = [];
+  piDirectEditCalls: PiDirectEditRequest[] = [];
+  rejectNextDirectEdit: ApiClientError | null = null;
+  holdNextDirectEdit = false;
+  releaseDirectEdit: (() => void) | null = null;
   loadCalls = 0;
   revertCalls = 0;
   rejectNextReplace: ApiClientError | null = null;
@@ -349,6 +396,39 @@ class MockApiClient implements FrontendApiClient {
       warnings: validation.validationResults.filter((result) => result.level === "warning").map((result) => result.message),
       validationResults: validation.validationResults,
       rawPiOutput: { source: "test" }
+    };
+  }
+
+  async piDirectEdit(request: PiDirectEditRequest): Promise<PiDirectEditResponse> {
+    this.piDirectEditCalls.push(structuredClone(request));
+    if (this.holdNextDirectEdit) {
+      this.holdNextDirectEdit = false;
+      await new Promise<void>((resolve) => {
+        this.releaseDirectEdit = resolve;
+      });
+      this.releaseDirectEdit = null;
+    }
+    if (this.rejectNextDirectEdit) {
+      const error = this.rejectNextDirectEdit;
+      this.rejectNextDirectEdit = null;
+      throw error;
+    }
+    const previous = structuredClone(this.graph);
+    this.graph = {
+      ...this.graph,
+      nodes: [...this.graph.nodes, { id: "direct-review", label: "Direct Review", type: "concept", origin: "llm", notes: request.instruction }]
+    };
+    const actionSummary = summary("Applied Pi direct JSON edit", request.instruction, { addedNodes: ["direct-review"] });
+    return {
+      message: "Pi edited working graph JSON; backend reloaded and validated the result.",
+      mode: "direct_json",
+      graph: structuredClone(this.graph),
+      snapshots: structuredClone(this.snapshots),
+      actionSummary,
+      warnings: [],
+      validationResults: [],
+      changedElementIds: ["direct-review"],
+      rawPiOutput: { previousNodeCount: previous.nodes.length }
     };
   }
 }
@@ -508,6 +588,14 @@ async function changeTextarea(textarea: HTMLTextAreaElement, value: string): Pro
     setter?.call(textarea, value);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     textarea.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+async function changeSelect(select: HTMLSelectElement, value: string): Promise<void> {
+  assert.ok(select, "Missing select");
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
 

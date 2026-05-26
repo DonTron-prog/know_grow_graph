@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import cors from "cors";
 import express, { type ErrorRequestHandler, type NextFunction, type Request, type Response } from "express";
 import {
@@ -12,6 +14,8 @@ import {
   parseGraphState,
   piCoderRequestSchema,
   piCoderResponseSchema,
+  piDirectEditRequestSchema,
+  piDirectEditResponseSchema,
   replaceWorkingGraphRequestSchema,
   validateGraphPatch,
   validateGraphState,
@@ -21,12 +25,15 @@ import {
   type GraphState,
   type PiCoderRequest,
   type PiCoderResponse,
+  type PiDirectEditRequest,
+  type PiDirectEditResponse,
   type SnapshotMeta,
   type ValidationResult
 } from "@know-grow/shared";
 import {
   asWorkingCopy,
   loadSnapshotsMeta,
+  readJson,
   loadSourceGraph,
   loadWorkingGraph,
   readSnapshotGraph,
@@ -276,6 +283,191 @@ async function requestPiAgent(piAgentUrl: string, request: PiCoderRequest, timeo
   }
 }
 
+type DirectEditBackup = {
+  sourceGraph: Buffer;
+  workingGraph: Buffer;
+  snapshotsMeta: Buffer;
+  snapshotFiles: Map<string, Buffer>;
+};
+
+function checksum(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function backupDirectEditFiles(paths: BackendPaths): Promise<DirectEditBackup> {
+  return {
+    sourceGraph: await readFile(paths.sourceGraph),
+    workingGraph: await readFile(paths.workingGraph),
+    snapshotsMeta: await readFile(paths.snapshotsMeta),
+    snapshotFiles: await readSnapshotFileBackups(paths)
+  };
+}
+
+async function readSnapshotFileBackups(paths: BackendPaths): Promise<Map<string, Buffer>> {
+  const backups = new Map<string, Buffer>();
+  let entries: string[];
+  try {
+    entries = await readdir(paths.snapshotsDir);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code === "ENOENT") {
+      return backups;
+    }
+    throw error;
+  }
+
+  for (const entry of entries) {
+    if (entry.endsWith(".json")) {
+      backups.set(entry, await readFile(join(paths.snapshotsDir, entry)));
+    }
+  }
+  return backups;
+}
+
+async function restoreDirectEditFiles(paths: BackendPaths, backup: DirectEditBackup): Promise<void> {
+  await mkdir(paths.snapshotsDir, { recursive: true });
+  await writeFile(paths.sourceGraph, backup.sourceGraph);
+  await writeFile(paths.workingGraph, backup.workingGraph);
+  await writeFile(paths.snapshotsMeta, backup.snapshotsMeta);
+
+  let currentSnapshotFiles: string[] = [];
+  try {
+    currentSnapshotFiles = (await readdir(paths.snapshotsDir)).filter((entry) => entry.endsWith(".json"));
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  await Promise.all(
+    currentSnapshotFiles
+      .filter((entry) => !backup.snapshotFiles.has(entry))
+      .map((entry) => rm(join(paths.snapshotsDir, entry), { force: true }))
+  );
+  await Promise.all([...backup.snapshotFiles].map(([entry, bytes]) => writeFile(join(paths.snapshotsDir, entry), bytes)));
+}
+
+async function requestPiAgentDirectEdit(piAgentUrl: string, request: PiDirectEditRequest, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${normalizePiAgentUrl(piAgentUrl)}/api/pi/direct-edit`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal: controller.signal
+    });
+    const body = await response.json().catch(() => undefined) as unknown;
+    if (!response.ok) {
+      throw new HttpError(502, "pi_agent_error", `Pi agent returned HTTP ${response.status}.`, body);
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new HttpError(504, "pi_agent_timeout", `Pi agent did not respond within ${timeoutMs}ms.`);
+    }
+    throw new HttpError(502, "pi_agent_unavailable", error instanceof Error ? error.message : "Pi agent is unavailable.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function createMockPiDirectEdit(paths: BackendPaths, request: PiDirectEditRequest, workingGraph: GraphState): Promise<unknown> {
+  const patch = createMockPiPatch({ ...request, mode: "patch" }, workingGraph);
+  const patchResult = applyGraphPatch(workingGraph, patch);
+  if (hasBlockers(patchResult.validationResults)) {
+    throw new HttpError(422, "mock_direct_edit_failed", "Mock Pi direct edit could not produce a valid graph patch.", validationDetails(patchResult.validationResults));
+  }
+  await saveWorkingGraph(paths, {
+    ...patchResult.graph,
+    stateType: "working",
+    updatedAt: new Date().toISOString()
+  });
+  return { source: "backend_mock_direct_json", patch };
+}
+
+async function loadAndValidateDirectEditResult(paths: BackendPaths): Promise<{ graph: GraphState; snapshots: SnapshotMeta[]; validationResults: ValidationResult[] }> {
+  const validationResults: ValidationResult[] = [];
+  let workingParse: GraphState | null = null;
+  try {
+    const workingInput = await readJson(paths.workingGraph);
+    const workingValidationResults = validateGraphState(workingInput);
+    validationResults.push(...workingValidationResults);
+    workingParse = hasBlockers(workingValidationResults) ? null : parseGraphState(workingInput);
+  } catch (error) {
+    validationResults.push({
+      level: "blocker",
+      code: "malformed_working_graph_file",
+      message: error instanceof Error ? `working_graph.json could not be read as a valid graph: ${error.message}` : "working_graph.json could not be read as a valid graph."
+    });
+  }
+  if (workingParse && workingParse.stateType !== "working") {
+    validationResults.push({
+      level: "blocker",
+      code: "working_graph_state_type_changed",
+      message: "Pi direct JSON edits must leave working_graph.json as a working graph."
+    });
+  }
+
+  let snapshots: SnapshotMeta[] = [];
+  try {
+    snapshots = await loadSnapshotsMeta(paths);
+  } catch (error) {
+    validationResults.push({
+      level: "blocker",
+      code: "malformed_snapshots_meta",
+      message: error instanceof Error ? `snapshots.json is invalid: ${error.message}` : "snapshots.json is invalid."
+    });
+  }
+
+  for (const snapshot of snapshots) {
+    try {
+      const snapshotGraph = await readSnapshotGraph(paths, snapshot.snapshotId);
+      const snapshotValidation = validateGraphState(snapshotGraph).map((result) => ({
+        ...result,
+        code: `snapshot_${result.code}`,
+        message: `Snapshot '${snapshot.snapshotId}': ${result.message}`
+      }));
+      validationResults.push(...snapshotValidation);
+    } catch (error) {
+      validationResults.push({
+        level: "blocker",
+        code: "snapshot_graph_unreadable",
+        message: error instanceof Error ? `Snapshot '${snapshot.snapshotId}' could not be read: ${error.message}` : `Snapshot '${snapshot.snapshotId}' could not be read.`,
+        elementIds: [snapshot.snapshotId]
+      });
+    }
+  }
+
+  if (hasBlockers(validationResults) || !workingParse) {
+    throw new HttpError(
+      422,
+      "invalid_direct_json_edit",
+      "Pi direct JSON edit produced invalid graph files; backups were restored.",
+      validationDetails(validationResults)
+    );
+  }
+
+  return { graph: workingParse, snapshots, validationResults };
+}
+
+function changedIdsFromSummary(summary: ActionSummary): string[] {
+  return [...new Set([
+    ...summary.addedNodes,
+    ...summary.updatedNodes,
+    ...summary.deletedNodes,
+    ...summary.addedEdges,
+    ...summary.updatedEdges,
+    ...summary.deletedEdges,
+    ...summary.mergedNodes,
+    ...summary.splitNodes
+  ])];
+}
+
 export function createApp(options: CreateAppOptions): express.Express {
   const app = express();
   const version = options.version ?? "0.1.0";
@@ -438,6 +630,68 @@ export function createApp(options: CreateAppOptions): express.Express {
       }
 
       res.json(responseFromPatch(request, workingGraph, piResponse.patch, piResponse.rawPiOutput ?? piResponse));
+    })
+  );
+
+  app.post(
+    "/api/pi/direct-edit",
+    asyncRoute(async (req, res) => {
+      const parsedRequest = piDirectEditRequestSchema.safeParse(req.body);
+      if (!parsedRequest.success) {
+        throw badRequestFromZod(parsedRequest.error.issues);
+      }
+
+      const request = { ...parsedRequest.data, mode: "direct_json" } satisfies PiDirectEditRequest;
+      const beforeGraph = await loadWorkingGraph(options.paths);
+      const backup = await backupDirectEditFiles(options.paths);
+      const sourceChecksumBefore = checksum(backup.sourceGraph);
+      let rawPiOutput: unknown;
+
+      try {
+        rawPiOutput = piAgentUrl
+          ? await requestPiAgentDirectEdit(piAgentUrl, request, piRequestTimeoutMs)
+          : await createMockPiDirectEdit(options.paths, request, beforeGraph);
+
+        let sourceAfter: Buffer;
+        try {
+          sourceAfter = await readFile(options.paths.sourceGraph);
+        } catch (error) {
+          throw new HttpError(422, "invalid_direct_json_edit", "Pi direct JSON edit changed or removed immutable source_graph.json; backups were restored.", {
+            validationResults: [{ level: "blocker", code: "source_graph_changed", message: error instanceof Error ? `source_graph.json could not be read after Pi direct JSON edit: ${error.message}` : "source_graph.json could not be read after Pi direct JSON edit." }]
+          });
+        }
+        if (checksum(sourceAfter) !== sourceChecksumBefore) {
+          throw new HttpError(422, "invalid_direct_json_edit", "Pi direct JSON edit changed immutable source_graph.json; backups were restored.", {
+            validationResults: [{ level: "blocker", code: "source_graph_changed", message: "source_graph.json changed during Pi direct JSON edit." }]
+          });
+        }
+
+        const directResult = await loadAndValidateDirectEditResult(options.paths);
+        const acceptedGraph = parseGraphState({
+          ...directResult.graph,
+          stateType: "working",
+          updatedAt: new Date().toISOString()
+        });
+        const actionSummary = summarizeGraphReplacement(beforeGraph, acceptedGraph, "Applied Pi direct JSON edit", request.instruction);
+        const changedElementIds = changedIdsFromSummary(actionSummary);
+        const warnings = directResult.validationResults.filter((result) => result.level === "warning").map((result) => result.message);
+        await saveWorkingGraph(options.paths, acceptedGraph);
+        const response: PiDirectEditResponse = {
+          message: "Pi edited working graph JSON; backend reloaded and validated the result.",
+          mode: "direct_json",
+          graph: acceptedGraph,
+          snapshots: directResult.snapshots,
+          actionSummary,
+          warnings,
+          validationResults: directResult.validationResults,
+          changedElementIds,
+          rawPiOutput
+        };
+        res.json(piDirectEditResponseSchema.parse(response));
+      } catch (error) {
+        await restoreDirectEditFiles(options.paths, backup);
+        throw error;
+      }
     })
   );
 

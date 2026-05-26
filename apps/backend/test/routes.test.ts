@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { once } from "node:events";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { type AddressInfo } from "node:net";
 import test from "node:test";
 import { createApp } from "../src/app.ts";
 import { initializePersistence, resolveBackendPaths } from "../src/persistence.ts";
 import { type GraphPatch, type GraphState } from "@know-grow/shared";
 
-async function startTestServer(): Promise<{
+async function startTestServer(options: { piAgentUrl?: string } = {}): Promise<{
   baseUrl: string;
   paths: ReturnType<typeof resolveBackendPaths>;
   close: () => Promise<void>;
@@ -18,7 +19,7 @@ async function startTestServer(): Promise<{
   const paths = resolveBackendPaths({ dataDir, repoRoot: resolve(import.meta.dirname, "../../..") });
   await initializePersistence(paths);
 
-  const server = createApp({ paths, version: "test" }).listen(0);
+  const server = createApp({ paths, version: "test", piAgentUrl: options.piAgentUrl }).listen(0);
   await once(server, "listening");
   const { port } = server.address() as AddressInfo;
 
@@ -39,6 +40,23 @@ async function postJson(url: string, body: unknown): Promise<Response> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
+}
+
+async function startFakePiAgent(handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = createServer((req, res) => {
+    void Promise.resolve(handler(req, res)).catch((error: unknown) => {
+      res.statusCode = 500;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    });
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())))
+  };
 }
 
 test("GET /api/snapshots returns the spec envelope", async () => {
@@ -455,6 +473,182 @@ test("POST /api/pi/chat rejects direct JSON mode on the patch chat route", async
     assert.equal(body.error.code, "direct_json_not_supported");
   } finally {
     await server.close();
+  }
+});
+
+test("POST /api/pi/direct-edit reloads and validates a mock direct JSON edit", async () => {
+  const server = await startTestServer();
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const originalSource = await readFile(server.paths.sourceGraph, "utf8");
+    const response = await postJson(`${server.baseUrl}/api/pi/direct-edit`, {
+      instruction: "Add a direct JSON concept",
+      selectedNodeIds: ["prompting"],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "direct_json"
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+    const sourceAfter = await readFile(server.paths.sourceGraph, "utf8");
+
+    assert.equal(response.status, 200);
+    assert.equal(body.mode, "direct_json");
+    assert.equal(body.message, "Pi edited working graph JSON; backend reloaded and validated the result.");
+    assert.ok(body.graph.nodes.length > original.nodes.length);
+    assert.ok(body.changedElementIds.length > 0);
+    assert.deepEqual(persisted.nodes, body.graph.nodes);
+    assert.equal(sourceAfter, originalSource);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/pi/direct-edit restores backups when direct JSON output is invalid", async () => {
+  let pathsRef: ReturnType<typeof resolveBackendPaths> | null = null;
+  const piAgent = await startFakePiAgent(async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/pi/direct-edit" && pathsRef) {
+      const original = await readWorkingGraph(pathsRef.workingGraph);
+      await writeFile(pathsRef.workingGraph, JSON.stringify({ ...original, nodes: [original.nodes[0], original.nodes[0]] }), "utf8");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "Wrote invalid graph", mode: "direct_json" }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  const server = await startTestServer({ piAgentUrl: piAgent.url });
+  pathsRef = server.paths;
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const response = await postJson(`${server.baseUrl}/api/pi/direct-edit`, {
+      instruction: "Break the graph",
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "direct_json"
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 422);
+    assert.equal(body.error.code, "invalid_direct_json_edit");
+    assert.ok(body.error.details.validationResults.some((result: { code: string }) => result.code === "duplicate_node_id"));
+    assert.deepEqual(persisted, original);
+  } finally {
+    await server.close();
+    await piAgent.close();
+  }
+});
+
+test("POST /api/pi/direct-edit restores backups when direct JSON output is malformed JSON", async () => {
+  let pathsRef: ReturnType<typeof resolveBackendPaths> | null = null;
+  const piAgent = await startFakePiAgent(async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/pi/direct-edit" && pathsRef) {
+      await writeFile(pathsRef.workingGraph, "{not-json", "utf8");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "Wrote malformed graph", mode: "direct_json" }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  const server = await startTestServer({ piAgentUrl: piAgent.url });
+  pathsRef = server.paths;
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const response = await postJson(`${server.baseUrl}/api/pi/direct-edit`, {
+      instruction: "Write malformed JSON",
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "direct_json"
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 422);
+    assert.equal(body.error.code, "invalid_direct_json_edit");
+    assert.ok(body.error.details.validationResults.some((result: { code: string }) => result.code === "malformed_working_graph_file"));
+    assert.deepEqual(persisted, original);
+  } finally {
+    await server.close();
+    await piAgent.close();
+  }
+});
+
+test("POST /api/pi/direct-edit restores backups when source graph changes", async () => {
+  let pathsRef: ReturnType<typeof resolveBackendPaths> | null = null;
+  const piAgent = await startFakePiAgent(async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/pi/direct-edit" && pathsRef) {
+      const source = JSON.parse(await readFile(pathsRef.sourceGraph, "utf8")) as GraphState;
+      await writeFile(pathsRef.sourceGraph, JSON.stringify({ ...source, name: "Mutated source" }), "utf8");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "Mutated source", mode: "direct_json" }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  const server = await startTestServer({ piAgentUrl: piAgent.url });
+  pathsRef = server.paths;
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const originalSource = await readFile(server.paths.sourceGraph, "utf8");
+    const response = await postJson(`${server.baseUrl}/api/pi/direct-edit`, {
+      instruction: "Mutate source",
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "direct_json"
+    });
+    const body = await response.json();
+    const sourceAfter = await readFile(server.paths.sourceGraph, "utf8");
+
+    assert.equal(response.status, 422);
+    assert.equal(body.error.code, "invalid_direct_json_edit");
+    assert.ok(body.error.details.validationResults.some((result: { code: string }) => result.code === "source_graph_changed"));
+    assert.equal(sourceAfter, originalSource);
+  } finally {
+    await server.close();
+    await piAgent.close();
+  }
+});
+
+test("POST /api/pi/direct-edit restores backups when source graph is removed", async () => {
+  let pathsRef: ReturnType<typeof resolveBackendPaths> | null = null;
+  const piAgent = await startFakePiAgent(async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/pi/direct-edit" && pathsRef) {
+      await rm(pathsRef.sourceGraph, { force: true });
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ message: "Removed source", mode: "direct_json" }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  const server = await startTestServer({ piAgentUrl: piAgent.url });
+  pathsRef = server.paths;
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const originalSource = await readFile(server.paths.sourceGraph, "utf8");
+    const response = await postJson(`${server.baseUrl}/api/pi/direct-edit`, {
+      instruction: "Remove source",
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "direct_json"
+    });
+    const body = await response.json();
+    const sourceAfter = await readFile(server.paths.sourceGraph, "utf8");
+
+    assert.equal(response.status, 422);
+    assert.equal(body.error.code, "invalid_direct_json_edit");
+    assert.ok(body.error.details.validationResults.some((result: { code: string }) => result.code === "source_graph_changed"));
+    assert.equal(sourceAfter, originalSource);
+  } finally {
+    await server.close();
+    await piAgent.close();
   }
 });
 

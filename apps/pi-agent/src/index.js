@@ -1,20 +1,31 @@
 import { randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 
 const DEFAULT_PORT = Number(process.env.PI_AGENT_PORT ?? 4100);
-const graphDataDir = process.env.GRAPH_DATA_DIR ?? ".data";
+
+function getGraphDataDir() {
+  return process.env.GRAPH_DATA_DIR ?? ".data";
+}
 
 export function createPiAgentServer() {
   return createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/health") {
-        sendJson(res, 200, { ok: true, graphDataDir });
+        sendJson(res, 200, { ok: true, graphDataDir: getGraphDataDir() });
         return;
       }
 
       if (req.method === "POST" && req.url === "/api/pi/chat") {
         const request = await readJsonBody(req);
         sendJson(res, 200, createPatchResponse(request));
+        return;
+      }
+
+      if (req.method === "POST" && req.url === "/api/pi/direct-edit") {
+        const request = await readJsonBody(req);
+        sendJson(res, 200, await applyDirectJsonEdit(request));
         return;
       }
 
@@ -73,7 +84,56 @@ export function createPatchResponse(request) {
     message: "Pi agent proposed a patch. Review and apply it through the backend patch endpoint.",
     mode: "patch",
     patch,
-    rawPiOutput: { source: "pi-agent-mock", graphDataDir }
+    rawPiOutput: { source: "pi-agent-mock", graphDataDir: getGraphDataDir() }
+  };
+}
+
+export async function applyDirectJsonEdit(request) {
+  const instruction = typeof request?.instruction === "string" ? request.instruction : "";
+  const graphDataDir = getGraphDataDir();
+  const workingGraphPath = resolve(graphDataDir, "working_graph.json");
+  const graph = JSON.parse(await readFile(workingGraphPath, "utf8"));
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const selectedNodeIds = Array.isArray(request?.selectedNodeIds) ? request.selectedNodeIds : [];
+  const anchorNodeId = selectedNodeIds.find((id) => nodes.some((node) => node?.id === id)) ?? nodes[0]?.id;
+  const nodeId = uniqueId(nodes, `pi-${slugify(instruction) || "direct-suggestion"}`);
+  const nextGraph = {
+    ...graph,
+    nodes: [
+      ...nodes,
+      {
+        id: nodeId,
+        label: instruction.trim() ? `Pi: ${instruction.trim().slice(0, 48)}` : "Pi direct JSON concept",
+        type: "concept",
+        origin: "llm",
+        notes: "Mock pi-agent direct JSON edit.",
+        ...(anchorNodeId ? { sourceNodeIds: [anchorNodeId] } : {})
+      }
+    ],
+    edges,
+    updatedAt: new Date().toISOString()
+  };
+
+  if (anchorNodeId) {
+    nextGraph.edges = [
+      ...edges,
+      {
+        id: uniqueId(edges, `edge-${anchorNodeId}-${nodeId}`),
+        source: anchorNodeId,
+        target: nodeId,
+        label: "suggests",
+        origin: "llm",
+        notes: "Mock pi-agent direct JSON relationship."
+      }
+    ];
+  }
+
+  await writeFile(workingGraphPath, `${JSON.stringify(nextGraph, null, 2)}\n`, "utf8");
+  return {
+    message: "Pi agent edited working_graph.json directly.",
+    mode: "direct_json",
+    rawPiOutput: { source: "pi-agent-mock-direct-json", graphDataDir, workingGraphPath, addedNodeId: nodeId }
   };
 }
 
@@ -112,6 +172,6 @@ function sendJson(res, status, body) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   createPiAgentServer().listen(DEFAULT_PORT, () => {
     console.log(`pi-agent mock bridge listening on http://localhost:${DEFAULT_PORT}`);
-    console.log(`graph data dir: ${graphDataDir}`);
+    console.log(`graph data dir: ${getGraphDataDir()}`);
   });
 }
