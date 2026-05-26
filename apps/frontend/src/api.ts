@@ -1,4 +1,19 @@
-import type { GraphMeta, GraphState, HealthResponse, ListSnapshotsResponse, SnapshotMeta } from "@know-grow/shared";
+import type {
+  ApplyPatchResponse,
+  CreateSnapshotRequest,
+  CreateSnapshotResponse,
+  DuplicateSnapshotRequest,
+  DuplicateSnapshotResponse,
+  GraphMeta,
+  GraphPatch,
+  GraphState,
+  HealthResponse,
+  ListSnapshotsResponse,
+  LoadSnapshotResponse,
+  ReplaceWorkingGraphResponse,
+  RevertToSourceResponse,
+  SnapshotMeta
+} from "@know-grow/shared";
 
 export class ApiClientError extends Error {
   constructor(
@@ -18,6 +33,12 @@ export type FrontendApiClient = {
   fetchSourceMeta: () => Promise<GraphMeta>;
   fetchWorkingGraph: () => Promise<GraphState>;
   fetchSnapshots: () => Promise<SnapshotMeta[]>;
+  replaceWorkingGraph: (graph: GraphState) => Promise<ReplaceWorkingGraphResponse>;
+  createSnapshot: (request: CreateSnapshotRequest) => Promise<CreateSnapshotResponse>;
+  loadSnapshot: (snapshotId: string) => Promise<LoadSnapshotResponse>;
+  duplicateSnapshot: (snapshotId: string, request: DuplicateSnapshotRequest) => Promise<DuplicateSnapshotResponse>;
+  revertToSource: () => Promise<RevertToSourceResponse>;
+  applyPatch: (patch: GraphPatch) => Promise<ApplyPatchResponse>;
 };
 
 type ApiErrorBody = {
@@ -36,9 +57,14 @@ export function normalizeApiBaseUrl(value: string | undefined): string {
 export function createApiClient(baseUrl: string, fetchImpl: FetchLike = fetch): FrontendApiClient {
   const normalizedBaseUrl = normalizeApiBaseUrl(baseUrl);
 
-  async function getJson<T>(path: string): Promise<T> {
+  async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
-      headers: { accept: "application/json" }
+      ...init,
+      headers: {
+        accept: "application/json",
+        ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
+        ...init?.headers
+      }
     });
 
     const body = await readJson(response);
@@ -55,14 +81,22 @@ export function createApiClient(baseUrl: string, fetchImpl: FetchLike = fetch): 
     return body as T;
   }
 
+  const postJson = <T>(path: string, body: unknown = {}): Promise<T> => requestJson<T>(path, { method: "POST", body: JSON.stringify(body) });
+
   return {
-    fetchHealth: () => getJson<HealthResponse>("/health"),
-    fetchSourceMeta: () => getJson<GraphMeta>("/source/meta"),
-    fetchWorkingGraph: () => getJson<GraphState>("/working/graph"),
+    fetchHealth: () => requestJson<HealthResponse>("/health"),
+    fetchSourceMeta: () => requestJson<GraphMeta>("/source/meta"),
+    fetchWorkingGraph: () => requestJson<GraphState>("/working/graph"),
     fetchSnapshots: async () => {
-      const response = await getJson<ListSnapshotsResponse>("/snapshots");
+      const response = await requestJson<ListSnapshotsResponse>("/snapshots");
       return response.snapshots;
-    }
+    },
+    replaceWorkingGraph: (graph) => requestJson<ReplaceWorkingGraphResponse>("/working/graph", { method: "PUT", body: JSON.stringify({ graph }) }),
+    createSnapshot: (request) => postJson<CreateSnapshotResponse>("/snapshots", request),
+    loadSnapshot: (snapshotId) => postJson<LoadSnapshotResponse>(`/snapshots/${encodeURIComponent(snapshotId)}/load`),
+    duplicateSnapshot: (snapshotId, request) => postJson<DuplicateSnapshotResponse>(`/snapshots/${encodeURIComponent(snapshotId)}/duplicate`, request),
+    revertToSource: () => postJson<RevertToSourceResponse>("/working/revert-to-source"),
+    applyPatch: (patch) => postJson<ApplyPatchResponse>("/patch/apply", { patch })
   };
 }
 

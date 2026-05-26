@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import type { GraphEdge, GraphMeta, GraphNode, GraphState, SnapshotMeta } from "@know-grow/shared";
+import type { ActionSummary, GraphEdge, GraphMeta, GraphNode, GraphState, SnapshotMeta } from "@know-grow/shared";
 import { ApiClientError, type FrontendApiClient } from "./api.js";
+import {
+  addEdgeToGraph,
+  addNodeToGraph,
+  buildDeleteSelectionPatch,
+  buildMergeSelectedPatch,
+  buildSplitNodePatch,
+  createEmptyFrontendSummary,
+  updateEdgeInGraph,
+  updateNodeInGraph,
+  type GraphMutationResult
+} from "./graphMutations.js";
 import {
   calculateLayout,
   clampZoom,
@@ -15,6 +26,7 @@ import {
 
 type LoadStatus = "loading" | "ready" | "error";
 type PiTab = "chat" | "actions" | "raw";
+type PiStatus = "idle" | "thinking" | "validating" | "applying/reloading" | "failed" | "complete";
 
 type AppProps = {
   apiClient: FrontendApiClient;
@@ -41,6 +53,15 @@ export function App({ apiClient }: AppProps) {
   const [selection, setSelection] = useState<ElementSelection>(EMPTY_SELECTION);
   const [changedElementIds, setChangedElementIds] = useState<string[]>([]);
   const [activePiTab, setActivePiTab] = useState<PiTab>("chat");
+  const [piStatus, setPiStatus] = useState<PiStatus>("idle");
+  const [undoStack, setUndoStack] = useState<GraphState[]>([]);
+  const [redoStack, setRedoStack] = useState<GraphState[]>([]);
+  const [unsavedChanges, setUnsavedChanges] = useState(false);
+  const [activeSnapshotName, setActiveSnapshotName] = useState<string | null>(null);
+  const [lastActionSummary, setLastActionSummary] = useState<ActionSummary | null>(null);
+  const [rawDetails, setRawDetails] = useState<unknown>(null);
+  const graphRef = useRef<GraphState | null>(null);
+  const mutationQueueRef = useRef(Promise.resolve());
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +80,10 @@ export function App({ apiClient }: AppProps) {
           setData({ sourceMeta, workingGraph, snapshots });
           setSelection(EMPTY_SELECTION);
           setChangedElementIds([]);
+          setUndoStack([]);
+          setRedoStack([]);
+          setUnsavedChanges(false);
+          setActiveSnapshotName(workingGraph.stateType === "snapshot" ? workingGraph.name : null);
           setStatus("ready");
         }
       } catch (error) {
@@ -76,6 +101,10 @@ export function App({ apiClient }: AppProps) {
     };
   }, [apiClient]);
 
+  useEffect(() => {
+    graphRef.current = data?.workingGraph ?? null;
+  }, [data?.workingGraph]);
+
   const selectedNodes = useMemo(() => {
     const nodes = data?.workingGraph.nodes ?? [];
     return selection.nodeIds.map((id) => nodes.find((node) => node.id === id)).filter((node): node is GraphNode => Boolean(node));
@@ -86,58 +115,370 @@ export function App({ apiClient }: AppProps) {
     return selection.edgeIds.map((id) => edges.find((edge) => edge.id === id)).filter((edge): edge is GraphEdge => Boolean(edge));
   }, [data?.workingGraph.edges, selection.edgeIds]);
 
+  async function refreshSnapshots(): Promise<SnapshotMeta[]> {
+    const snapshots = await apiClient.fetchSnapshots();
+    setData((current) => (current ? { ...current, snapshots } : current));
+    return snapshots;
+  }
+
+  function rememberError(error: unknown): void {
+    const message = formatLoadError(error);
+    setErrorMessage(message);
+    setRawDetails(error instanceof ApiClientError ? { code: error.code, status: error.status, message: error.message, details: error.details } : { message });
+    setPiStatus("failed");
+  }
+
+  function acceptWorkingGraph(graph: GraphState, options: { pushUndo?: boolean; redoGraph?: GraphState | null; changedIds?: string[]; actionSummary?: ActionSummary | null; raw?: unknown; unsaved?: boolean } = {}): void {
+    const previousGraph = graphRef.current;
+    graphRef.current = graph;
+    setData((current) => (current ? { ...current, workingGraph: graph } : current));
+    setChangedElementIds(options.changedIds ?? []);
+    setLastActionSummary(options.actionSummary ?? null);
+    setRawDetails(options.raw ?? null);
+    setErrorMessage(null);
+    setStatus("ready");
+    setPiStatus("complete");
+    setUnsavedChanges(options.unsaved ?? true);
+    if (options.pushUndo && previousGraph) {
+      setUndoStack((stack) => [...stack, previousGraph]);
+      setRedoStack([]);
+    }
+    if (options.redoGraph) {
+      setRedoStack((stack) => [...stack, options.redoGraph as GraphState]);
+    }
+  }
+
+  async function enqueueMutation(work: () => Promise<void>): Promise<void> {
+    const run = mutationQueueRef.current.then(work, work);
+    mutationQueueRef.current = run.catch(() => undefined);
+    await run;
+  }
+
+  async function persistMutation(result: GraphMutationResult, instructionRaw?: unknown): Promise<void> {
+    await enqueueMutation(async () => {
+      if (!data) {
+        return;
+      }
+      setPiStatus("validating");
+      try {
+        const response = await apiClient.replaceWorkingGraph(result.graph);
+        acceptWorkingGraph(response.graph, {
+          pushUndo: true,
+          changedIds: result.changedElementIds,
+          actionSummary: result.actionSummary,
+          raw: { request: instructionRaw ?? result.actionSummary.instruction, response },
+          unsaved: true
+        });
+      } catch (error) {
+        rememberError(error);
+      }
+    });
+  }
+
+  async function applyPatchMutation(patchResult: ReturnType<typeof buildMergeSelectedPatch> | ReturnType<typeof buildSplitNodePatch>): Promise<void> {
+    if (!patchResult || !data) {
+      return;
+    }
+    setPiStatus("validating");
+    try {
+      const response = await apiClient.applyPatch(patchResult);
+      acceptWorkingGraph(response.graph, {
+        pushUndo: true,
+        changedIds: response.changedElementIds,
+        actionSummary: response.actionSummary,
+        raw: response,
+        unsaved: true
+      });
+      setSelection(EMPTY_SELECTION);
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
+  async function handleUndo(): Promise<void> {
+    if (!data || undoStack.length === 0) {
+      return;
+    }
+    const previous = undoStack[undoStack.length - 1];
+    setPiStatus("validating");
+    try {
+      const response = await apiClient.replaceWorkingGraph(previous);
+      setUndoStack((stack) => stack.slice(0, -1));
+      acceptWorkingGraph(response.graph, {
+        redoGraph: data.workingGraph,
+        changedIds: [],
+        actionSummary: createEmptyFrontendSummary("Undo last change", "Undid graph change"),
+        raw: response,
+        unsaved: true
+      });
+      setActiveSnapshotName(null);
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
+  async function handleRedo(): Promise<void> {
+    if (!data || redoStack.length === 0) {
+      return;
+    }
+    const next = redoStack[redoStack.length - 1];
+    setPiStatus("validating");
+    try {
+      const response = await apiClient.replaceWorkingGraph(next);
+      setRedoStack((stack) => stack.slice(0, -1));
+      setUndoStack((stack) => [...stack, data.workingGraph]);
+      acceptWorkingGraph(response.graph, {
+        changedIds: [],
+        actionSummary: createEmptyFrontendSummary("Redo graph change", "Redid graph change"),
+        raw: response,
+        unsaved: true
+      });
+      setActiveSnapshotName(null);
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
+  async function handleAddNode(): Promise<void> {
+    if (!data) return;
+    const label = prompt("Node label?")?.trim();
+    if (!label) return;
+    const type = prompt("Node type?", "concept")?.trim() || "concept";
+    await persistMutation(addNodeToGraph(data.workingGraph, { label, type, position: { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT / 2 } }));
+  }
+
+  async function handleAddEdge(): Promise<void> {
+    if (!data || selection.nodeIds.length < 1 || selection.nodeIds.length > 2) return;
+    const [firstNodeId, secondNodeId] = selection.nodeIds;
+    const source = firstNodeId;
+    const target = secondNodeId ?? prompt("Target node id?")?.trim();
+    if (!source || !target) return;
+    const label = prompt("Edge label?", "relates to")?.trim() || "relates to";
+    await persistMutation(addEdgeToGraph(data.workingGraph, { source, target, label }));
+  }
+
+  async function handleMergeSelected(): Promise<void> {
+    if (!data || selection.nodeIds.length < 2) return;
+    const defaultLabel = selectedNodes.map((node) => node.label).join(" + ");
+    const label = prompt("Merged node label?", defaultLabel)?.trim();
+    if (!label) return;
+    const type = prompt("Merged node type?", selectedNodes[0]?.type ?? "concept")?.trim() || selectedNodes[0]?.type || "concept";
+    await applyPatchMutation(buildMergeSelectedPatch(data.workingGraph, selection.nodeIds, label, type));
+  }
+
+  async function handleSplitSelected(): Promise<void> {
+    if (!data || selection.nodeIds.length !== 1 || selection.edgeIds.length > 0) return;
+    const node = selectedNodes[0];
+    const labels = prompt("New node labels separated by commas?", node ? `${node.label} A, ${node.label} B` : "Part A, Part B")
+      ?.split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!labels || labels.length < 2) return;
+    const type = prompt("New node type?", node?.type ?? "concept")?.trim() || node?.type || "concept";
+    await applyPatchMutation(buildSplitNodePatch(data.workingGraph, selection.nodeIds[0], labels, type));
+  }
+
+  async function handleDeleteSelected(): Promise<void> {
+    if (!data || selectionCount(selection) === 0) return;
+    if (!confirm(`Delete ${selectionLabel(selection)} from the working graph? Incident edges for deleted nodes are removed too.`)) return;
+    await applyPatchMutation(buildDeleteSelectionPatch(data.workingGraph, selection));
+    setSelection(EMPTY_SELECTION);
+  }
+
+  async function handleSaveSnapshot(): Promise<void> {
+    if (!data) return;
+    const name = prompt("Snapshot name?", `${data.workingGraph.name} snapshot`)?.trim();
+    if (!name) return;
+    try {
+      const response = await apiClient.createSnapshot({ name, layout: data.workingGraph.layout });
+      const snapshots = await refreshSnapshots();
+      setActiveSnapshotName(response.snapshot.name);
+      setUnsavedChanges(false);
+      setLastActionSummary(createEmptyFrontendSummary(`Save snapshot '${response.snapshot.name}'`, "Saved snapshot"));
+      setRawDetails({ response, snapshots });
+      setErrorMessage(null);
+      setPiStatus("complete");
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
+  async function handleSnapshotAction(value: string): Promise<void> {
+    if (!value || !data) return;
+    try {
+      if (value === "revert-source") {
+        if (!confirm("Revert the working graph to the immutable source graph?")) return;
+        const response = await apiClient.revertToSource();
+        acceptWorkingGraph(response.graph, { pushUndo: true, changedIds: [...response.actionSummary.addedNodes, ...response.actionSummary.updatedNodes, ...response.actionSummary.deletedNodes, ...response.actionSummary.addedEdges, ...response.actionSummary.updatedEdges, ...response.actionSummary.deletedEdges], actionSummary: response.actionSummary, raw: response, unsaved: true });
+        setActiveSnapshotName(null);
+        setSelection(EMPTY_SELECTION);
+        return;
+      }
+
+      const [action, snapshotId] = value.split(":");
+      const snapshot = data.snapshots.find((candidate) => candidate.snapshotId === snapshotId);
+      if (!snapshotId || !snapshot) return;
+
+      if (action === "load") {
+        if (!confirm(`Load snapshot '${snapshot.name}' into the working graph?`)) return;
+        const response = await apiClient.loadSnapshot(snapshotId);
+        acceptWorkingGraph(response.graph, { pushUndo: true, changedIds: [...response.actionSummary.addedNodes, ...response.actionSummary.updatedNodes, ...response.actionSummary.deletedNodes, ...response.actionSummary.addedEdges, ...response.actionSummary.updatedEdges, ...response.actionSummary.deletedEdges], actionSummary: response.actionSummary, raw: response, unsaved: false });
+        setActiveSnapshotName(response.snapshot.name);
+        setSelection(EMPTY_SELECTION);
+      }
+
+      if (action === "duplicate") {
+        const name = prompt("Duplicate snapshot name?", `${snapshot.name} copy`)?.trim();
+        if (!name) return;
+        const response = await apiClient.duplicateSnapshot(snapshotId, { name });
+        await refreshSnapshots();
+        setLastActionSummary(createEmptyFrontendSummary(`Duplicate snapshot '${snapshot.name}'`, "Duplicated snapshot"));
+        setRawDetails(response);
+        setPiStatus("complete");
+      }
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
+  async function handleNodeUpdate(nodeId: string, changes: Partial<Pick<GraphNode, "label" | "type" | "notes">>): Promise<void> {
+    await enqueueMutation(async () => {
+      const graph = graphRef.current;
+      if (!graph) return;
+      const result = updateNodeInGraph(graph, nodeId, changes);
+      if (result) {
+        setPiStatus("validating");
+        try {
+          const response = await apiClient.replaceWorkingGraph(result.graph);
+          acceptWorkingGraph(response.graph, { pushUndo: true, changedIds: result.changedElementIds, actionSummary: result.actionSummary, raw: response, unsaved: true });
+        } catch (error) {
+          rememberError(error);
+        }
+      }
+    });
+  }
+
+  async function handleEdgeUpdate(edgeId: string, changes: Partial<Pick<GraphEdge, "label" | "notes">>): Promise<void> {
+    await enqueueMutation(async () => {
+      const graph = graphRef.current;
+      if (!graph) return;
+      const result = updateEdgeInGraph(graph, edgeId, changes);
+      if (result) {
+        setPiStatus("validating");
+        try {
+          const response = await apiClient.replaceWorkingGraph(result.graph);
+          acceptWorkingGraph(response.graph, { pushUndo: true, changedIds: result.changedElementIds, actionSummary: result.actionSummary, raw: response, unsaved: true });
+        } catch (error) {
+          rememberError(error);
+        }
+      }
+    });
+  }
+
+  async function handleLayoutChange(layout: Record<string, CanvasPosition>): Promise<void> {
+    if (!data) return;
+    const graph = { ...data.workingGraph, layout };
+    const actionSummary = createEmptyFrontendSummary("Persist dragged node layout", "Updated layout");
+    await persistMutation({ graph, actionSummary, changedElementIds: [] });
+  }
+
   return (
     <main className="app-shell" aria-label="Snapshot Multi-View Knowledge Graph Workbench">
-      <TopToolbar snapshots={data?.snapshots ?? []} selection={selection} />
+      <TopToolbar
+        snapshots={data?.snapshots ?? []}
+        selection={selection}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onAddNode={handleAddNode}
+        onAddEdge={handleAddEdge}
+        onMergeSelected={handleMergeSelected}
+        onSplitSelected={handleSplitSelected}
+        onDeleteSelected={handleDeleteSelected}
+        onSaveSnapshot={handleSaveSnapshot}
+        onSnapshotAction={handleSnapshotAction}
+      />
       <section className="main-grid" aria-label="Workbench regions">
-        <InspectorPanel selection={selection} graph={data?.workingGraph} nodes={selectedNodes} edges={selectedEdges} />
-        <GraphCanvas graph={data?.workingGraph} status={status} selected={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} onSelect={setSelection} />
-        <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} />
+        <InspectorPanel selection={selection} graph={data?.workingGraph} nodes={selectedNodes} edges={selectedEdges} unsavedChanges={unsavedChanges} activeSnapshotName={activeSnapshotName} onNodeUpdate={handleNodeUpdate} onEdgeUpdate={handleEdgeUpdate} />
+        <GraphCanvas graph={data?.workingGraph} status={status} selected={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} onSelect={setSelection} onLayoutChange={handleLayoutChange} />
+        <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} piStatus={piStatus} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} actionSummary={lastActionSummary} rawDetails={rawDetails} />
       </section>
       <StatusBar
         status={status}
+        piStatus={piStatus}
         graph={data?.workingGraph}
         sourceMeta={data?.sourceMeta}
         snapshots={data?.snapshots ?? []}
         selection={selection}
         errorMessage={errorMessage}
+        unsavedChanges={unsavedChanges}
+        activeSnapshotName={activeSnapshotName}
       />
     </main>
   );
 }
 
-function TopToolbar({ snapshots, selection }: { snapshots: SnapshotMeta[]; selection: ElementSelection }) {
+function TopToolbar({
+  snapshots,
+  selection,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onAddNode,
+  onAddEdge,
+  onMergeSelected,
+  onSplitSelected,
+  onDeleteSelected,
+  onSaveSnapshot,
+  onSnapshotAction
+}: {
+  snapshots: SnapshotMeta[];
+  selection: ElementSelection;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onAddNode: () => void;
+  onAddEdge: () => void;
+  onMergeSelected: () => void;
+  onSplitSelected: () => void;
+  onDeleteSelected: () => void;
+  onSaveSnapshot: () => void;
+  onSnapshotAction: (value: string) => void;
+}) {
   const hasSelection = selectionCount(selection) > 0;
-  const canAddEdge = selection.nodeIds.length >= 1 && selection.nodeIds.length <= 2;
+  const canAddEdge = selection.nodeIds.length >= 1 && selection.nodeIds.length <= 2 && selection.edgeIds.length === 0;
   const canMerge = selection.nodeIds.length >= 2;
   const canSplit = selection.nodeIds.length === 1 && selection.edgeIds.length === 0;
-  const controls = [
-    { label: "Undo", title: "Undo lands with frontend-owned mutation history." },
-    { label: "Redo", title: "Redo lands with frontend-owned mutation history." },
-    { label: "Add Node", title: "Mutation controls land after graph interaction." },
-    { label: "Add Edge", title: canAddEdge ? "Add-edge form lands with toolbar patch operations." : "Select one or two nodes to add an edge." },
-    { label: "Merge Selected", title: canMerge ? "Merge confirmation lands with toolbar patch operations." : "Select two or more nodes to merge." },
-    { label: "Split Selected", title: canSplit ? "Split form lands with toolbar patch operations." : "Select exactly one node to split." },
-    { label: "Delete Selected", title: hasSelection ? "Delete confirmation lands with toolbar patch operations." : "Select a node or edge to delete." },
-    { label: "Save Snapshot", title: "Snapshot saving lands with frontend mutation flows." }
-  ];
 
   return (
     <header className="top-toolbar" aria-label="Top toolbar">
       <div className="brand">Know Grow Graph</div>
       <nav className="toolbar-actions" aria-label="Graph actions">
-        {controls.map((control) => (
-          <button key={control.label} type="button" disabled title={control.title}>
-            {control.label}
-          </button>
-        ))}
+        <button type="button" disabled={!canUndo} onClick={onUndo}>Undo</button>
+        <button type="button" disabled={!canRedo} onClick={onRedo}>Redo</button>
+        <button type="button" onClick={onAddNode}>Add Node</button>
+        <button type="button" disabled={!canAddEdge} onClick={onAddEdge} title={canAddEdge ? "Add a human-origin edge between selected nodes." : "Select one or two nodes to add an edge."}>Add Edge</button>
+        <button type="button" disabled={!canMerge} onClick={onMergeSelected}>Merge Selected</button>
+        <button type="button" disabled={!canSplit} onClick={onSplitSelected}>Split Selected</button>
+        <button type="button" disabled={!hasSelection} onClick={onDeleteSelected}>Delete Selected</button>
+        <button type="button" onClick={onSaveSnapshot}>Save Snapshot</button>
         <label className="snapshot-picker">
           Snapshot
-          <select disabled defaultValue="" title="Snapshot loading actions land after the interaction slice">
+          <select defaultValue="" onChange={(event) => { void onSnapshotAction(event.target.value); event.currentTarget.value = ""; }}>
             <option value="">Current working graph</option>
+            <option value="revert-source">Revert to source</option>
+            {snapshots.length > 0 ? <option disabled>──────────</option> : null}
             {snapshots.map((snapshot) => (
-              <option key={snapshot.snapshotId} value={snapshot.snapshotId}>
-                {snapshot.name}
+              <option key={`load-${snapshot.snapshotId}`} value={`load:${snapshot.snapshotId}`}>
+                Load: {snapshot.name}
+              </option>
+            ))}
+            {snapshots.map((snapshot) => (
+              <option key={`duplicate-${snapshot.snapshotId}`} value={`duplicate:${snapshot.snapshotId}`}>
+                Duplicate: {snapshot.name}
               </option>
             ))}
           </select>
@@ -151,12 +492,20 @@ function InspectorPanel({
   selection,
   graph,
   nodes,
-  edges
+  edges,
+  unsavedChanges,
+  activeSnapshotName,
+  onNodeUpdate,
+  onEdgeUpdate
 }: {
   selection: ElementSelection;
   graph?: GraphState;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  unsavedChanges: boolean;
+  activeSnapshotName: string | null;
+  onNodeUpdate: (nodeId: string, changes: Partial<Pick<GraphNode, "label" | "type" | "notes">>) => void;
+  onEdgeUpdate: (edgeId: string, changes: Partial<Pick<GraphEdge, "label" | "notes">>) => void;
 }) {
   const selectedCount = selectionCount(selection);
   const missingNodeIds = selection.nodeIds.filter((id) => !nodes.some((node) => node.id === id));
@@ -165,18 +514,18 @@ function InspectorPanel({
   return (
     <aside className="panel inspector-panel" aria-label="Inspector panel">
       <h2>Inspector</h2>
-      {selectedCount === 0 ? <GraphSummary graph={graph} /> : null}
+      {selectedCount === 0 ? <GraphSummary graph={graph} unsavedChanges={unsavedChanges} activeSnapshotName={activeSnapshotName} /> : null}
       {missingNodeIds.length > 0 || missingEdgeIds.length > 0 ? (
         <EmptyState title="Invalid or deleted selection" body={`Missing ${[...missingNodeIds, ...missingEdgeIds].join(", ")}.`} />
       ) : null}
-      {selectedCount === 1 && nodes.length === 1 ? <NodeDetails node={nodes[0]} graph={graph} /> : null}
-      {selectedCount === 1 && edges.length === 1 ? <EdgeDetails edge={edges[0]} graph={graph} /> : null}
+      {selectedCount === 1 && nodes.length === 1 ? <NodeDetails key={`${nodes[0].id}:${nodes[0].label}:${nodes[0].type}:${nodes[0].notes ?? ""}`} node={nodes[0]} graph={graph} onUpdate={onNodeUpdate} /> : null}
+      {selectedCount === 1 && edges.length === 1 ? <EdgeDetails key={`${edges[0].id}:${edges[0].label}:${edges[0].notes ?? ""}`} edge={edges[0]} graph={graph} onUpdate={onEdgeUpdate} /> : null}
       {selectedCount > 1 ? <MultiSelectionDetails selection={selection} nodes={nodes} edges={edges} /> : null}
     </aside>
   );
 }
 
-function GraphSummary({ graph }: { graph?: GraphState }) {
+function GraphSummary({ graph, unsavedChanges, activeSnapshotName }: { graph?: GraphState; unsavedChanges: boolean; activeSnapshotName: string | null }) {
   return graph ? (
     <dl className="details-list">
       <dt>Graph</dt>
@@ -188,57 +537,79 @@ function GraphSummary({ graph }: { graph?: GraphState }) {
       <dt>Edges</dt>
       <dd>{graph.edges.length}</dd>
       <dt>Active snapshot</dt>
-      <dd>{graph.stateType === "snapshot" ? graph.name : "Current working graph"}</dd>
+      <dd>{activeSnapshotName ?? "Current working graph"}</dd>
       <dt>Unsaved changes</dt>
-      <dd>No</dd>
+      <dd>{unsavedChanges ? "Yes" : "No"}</dd>
     </dl>
   ) : (
     <EmptyState title="No graph loaded" body="The inspector will show graph details after the working graph loads." />
   );
 }
 
-function NodeDetails({ node, graph }: { node: GraphNode; graph?: GraphState }) {
+function NodeDetails({ node, graph, onUpdate }: { node: GraphNode; graph?: GraphState; onUpdate: (nodeId: string, changes: Partial<Pick<GraphNode, "label" | "type" | "notes">>) => void }) {
   const connectedEdges = graph?.edges.filter((edge) => edge.source === node.id || edge.target === node.id) ?? [];
+  const readOnly = graph?.stateType === "source";
   return (
-    <dl className="details-list">
-      <dt>Node</dt>
-      <dd>{node.label}</dd>
-      <dt>ID</dt>
-      <dd>{node.id}</dd>
-      <dt>Type</dt>
-      <dd>{node.type}</dd>
-      <dt>Origin</dt>
-      <dd>{node.origin}</dd>
-      <dt>Notes</dt>
-      <dd>{node.notes || "—"}</dd>
-      <dt>Source refs</dt>
-      <dd>{node.sourceNodeIds?.join(", ") || "—"}</dd>
-      <dt>Connected edges</dt>
-      <dd>{connectedEdges.length > 0 ? connectedEdges.map((edge) => edge.label || edge.id).join(", ") : "—"}</dd>
-    </dl>
+    <div className="details-editor">
+      <label>
+        Label
+        <input disabled={readOnly} defaultValue={node.label} onBlur={(event) => onUpdate(node.id, { label: event.currentTarget.value })} />
+      </label>
+      <dl className="details-list">
+        <dt>ID</dt>
+        <dd>{node.id}</dd>
+      </dl>
+      <label>
+        Type
+        <input disabled={readOnly} defaultValue={node.type} onBlur={(event) => onUpdate(node.id, { type: event.currentTarget.value || "concept" })} />
+      </label>
+      <dl className="details-list">
+        <dt>Origin</dt>
+        <dd>{node.origin}</dd>
+      </dl>
+      <label>
+        Notes
+        <textarea disabled={readOnly} defaultValue={node.notes ?? ""} onBlur={(event) => onUpdate(node.id, { notes: event.currentTarget.value })} />
+      </label>
+      <dl className="details-list">
+        <dt>Source refs</dt>
+        <dd>{node.sourceNodeIds?.join(", ") || "—"}</dd>
+        <dt>Connected edges</dt>
+        <dd>{connectedEdges.length > 0 ? connectedEdges.map((edge) => edge.label || edge.id).join(", ") : "—"}</dd>
+      </dl>
+    </div>
   );
 }
 
-function EdgeDetails({ edge, graph }: { edge: GraphEdge; graph?: GraphState }) {
+function EdgeDetails({ edge, graph, onUpdate }: { edge: GraphEdge; graph?: GraphState; onUpdate: (edgeId: string, changes: Partial<Pick<GraphEdge, "label" | "notes">>) => void }) {
   const source = graph?.nodes.find((node) => node.id === edge.source);
   const target = graph?.nodes.find((node) => node.id === edge.target);
+  const readOnly = graph?.stateType === "source";
   return (
-    <dl className="details-list">
-      <dt>Edge</dt>
-      <dd>{edge.label || "Unlabeled edge"}</dd>
-      <dt>ID</dt>
-      <dd>{edge.id}</dd>
-      <dt>Source → Target</dt>
-      <dd>
-        {source?.label ?? edge.source} → {target?.label ?? edge.target}
-      </dd>
-      <dt>Origin</dt>
-      <dd>{edge.origin}</dd>
-      <dt>Notes</dt>
-      <dd>{edge.notes || "—"}</dd>
-      <dt>Source refs</dt>
-      <dd>{edge.sourceEdgeIds?.join(", ") || "—"}</dd>
-    </dl>
+    <div className="details-editor">
+      <label>
+        Relation label
+        <input disabled={readOnly} defaultValue={edge.label} onBlur={(event) => onUpdate(edge.id, { label: event.currentTarget.value })} />
+      </label>
+      <dl className="details-list">
+        <dt>ID</dt>
+        <dd>{edge.id}</dd>
+        <dt>Source → Target</dt>
+        <dd>
+          {source?.label ?? edge.source} → {target?.label ?? edge.target}
+        </dd>
+        <dt>Origin</dt>
+        <dd>{edge.origin}</dd>
+      </dl>
+      <label>
+        Notes
+        <textarea disabled={readOnly} defaultValue={edge.notes ?? ""} onBlur={(event) => onUpdate(edge.id, { notes: event.currentTarget.value })} />
+      </label>
+      <dl className="details-list">
+        <dt>Source refs</dt>
+        <dd>{edge.sourceEdgeIds?.join(", ") || "—"}</dd>
+      </dl>
+    </div>
   );
 }
 
@@ -265,7 +636,8 @@ function GraphCanvas({
   selected,
   changedElementIds,
   errorMessage,
-  onSelect
+  onSelect,
+  onLayoutChange
 }: {
   graph?: GraphState;
   status: LoadStatus;
@@ -273,20 +645,34 @@ function GraphCanvas({
   changedElementIds: string[];
   errorMessage: string | null;
   onSelect: (selection: ElementSelection) => void;
+  onLayoutChange: (layout: Record<string, CanvasPosition>) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const backgroundPointerMovedRef = useRef(false);
-  const layout = useMemo(() => (graph ? calculateLayout(graph) : null), [graph]);
+  const nodePointerMovedRef = useRef(false);
+  const layout = useMemo(() => (graph ? calculateLayout(graph, { preserveCanvasLayout: true }) : null), [graph]);
   const [positions, setPositions] = useState<Map<string, CanvasPosition>>(new Map());
+  const positionsRef = useRef<Map<string, CanvasPosition>>(new Map());
   const changedElementIdSet = useMemo(() => new Set(changedElementIds), [changedElementIds]);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
   const [interaction, setInteraction] = useState<CanvasInteraction | null>(null);
 
   useEffect(() => {
-    setPositions(new Map(layout?.positions ?? []));
+    const nextPositions = new Map(layout?.positions ?? []);
+    positionsRef.current = nextPositions;
+    setPositions(nextPositions);
     setViewport({ x: 0, y: 0, scale: 1 });
     setInteraction(null);
   }, [layout]);
+
+  useEffect(() => {
+    if (errorMessage && layout) {
+      const nextPositions = new Map(layout.positions);
+      positionsRef.current = nextPositions;
+      setPositions(nextPositions);
+      setInteraction(null);
+    }
+  }, [errorMessage, layout]);
 
   function screenToCanvas(clientX: number, clientY: number): CanvasPosition {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -319,6 +705,7 @@ function GraphCanvas({
   function handleNodePointerDown(nodeId: string, event: PointerEvent<SVGGElement>) {
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
+    nodePointerMovedRef.current = false;
     handleSelect({ kind: "node", id: nodeId }, event);
     const pointer = screenToCanvas(event.clientX, event.clientY);
     const nodePosition = positions.get(nodeId) ?? pointer;
@@ -337,12 +724,12 @@ function GraphCanvas({
     }
 
     if (interaction.type === "drag-node") {
+      nodePointerMovedRef.current = true;
       const pointer = screenToCanvas(event.clientX, event.clientY);
-      setPositions((current) => {
-        const next = new Map(current);
-        next.set(interaction.nodeId, { x: pointer.x - interaction.pointerOffset.x, y: pointer.y - interaction.pointerOffset.y });
-        return next;
-      });
+      const next = new Map(positionsRef.current);
+      next.set(interaction.nodeId, { x: pointer.x - interaction.pointerOffset.x, y: pointer.y - interaction.pointerOffset.y });
+      positionsRef.current = next;
+      setPositions(next);
       return;
     }
 
@@ -358,7 +745,12 @@ function GraphCanvas({
 
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
     if (interaction && event.pointerId === interaction.pointerId) {
+      const completedInteraction = interaction;
       setInteraction(null);
+      if (completedInteraction.type === "drag-node" && graph && nodePointerMovedRef.current) {
+        nodePointerMovedRef.current = false;
+        onLayoutChange(Object.fromEntries(positionsRef.current));
+      }
     }
   }
 
@@ -383,7 +775,7 @@ function GraphCanvas({
       <div className="graph-canvas-header">
         <div>
           <h1>{graph?.name ?? "Working graph"}</h1>
-          <p>Scroll to zoom, drag the background to pan, drag nodes to adjust the working layout, Shift/Ctrl-click to multi-select.</p>
+          <p>Scroll to zoom, drag the background to pan, drag nodes to persist working layout, Shift/Ctrl-click to multi-select.</p>
         </div>
         <div className="graph-canvas-meta">
           {graph ? <span>{graph.nodes.length} nodes · {graph.edges.length} edges</span> : null}
@@ -477,19 +869,25 @@ function GraphCanvas({
 function PiPanel({
   activeTab,
   onTabChange,
+  piStatus,
   status,
   graph,
   selection,
   changedElementIds,
-  errorMessage
+  errorMessage,
+  actionSummary,
+  rawDetails
 }: {
   activeTab: PiTab;
   onTabChange: (tab: PiTab) => void;
+  piStatus: PiStatus;
   status: LoadStatus;
   graph?: GraphState;
   selection: ElementSelection;
   changedElementIds: string[];
   errorMessage: string | null;
+  actionSummary: ActionSummary | null;
+  rawDetails: unknown;
 }) {
   return (
     <aside className="panel pi-panel" aria-label="Pi panel">
@@ -503,37 +901,69 @@ function PiPanel({
       </div>
       {activeTab === "chat" ? (
         <div className="tab-panel">
-          <EmptyState title="Pi chat not connected yet" body="Graph context and selection now load here; patch/direct JSON workflows will connect next." />
+          <EmptyState title="Pi chat not connected yet" body="Manual graph edits now use the same validated working graph and patch pathways that Pi proposals will use next." />
           <textarea disabled placeholder="Ask Pi to transform the graph…" />
           <button type="button" disabled>Send to Pi</button>
+          <span>Pi status: {piStatus}</span>
         </div>
       ) : null}
       {activeTab === "actions" ? (
         <div className="tab-panel">
-          <EmptyState title="No proposed actions" body="Patch summaries and validation warnings will appear here after Pi or toolbar mutations are implemented." />
+          {actionSummary ? <ActionSummaryView actionSummary={actionSummary} /> : <EmptyState title="No proposed actions" body="Patch summaries and validation warnings appear here after toolbar, inspector, snapshot, or Pi mutations." />}
         </div>
       ) : null}
       {activeTab === "raw" ? (
-        <pre className="raw-output">{JSON.stringify({ status, graphId: graph?.graphId, nodeCount: graph?.nodes.length ?? 0, edgeCount: graph?.edges.length ?? 0, selectedNodeIds: selection.nodeIds, selectedEdgeIds: selection.edgeIds, changedElementIds, error: errorMessage }, null, 2)}</pre>
+        <pre className="raw-output">{JSON.stringify({ status, piStatus, graphId: graph?.graphId, nodeCount: graph?.nodes.length ?? 0, edgeCount: graph?.edges.length ?? 0, selectedNodeIds: selection.nodeIds, selectedEdgeIds: selection.edgeIds, changedElementIds, error: errorMessage, details: rawDetails }, null, 2)}</pre>
       ) : null}
     </aside>
   );
 }
 
+function ActionSummaryView({ actionSummary }: { actionSummary: ActionSummary }) {
+  return (
+    <dl className="details-list">
+      <dt>Title</dt>
+      <dd>{actionSummary.title}</dd>
+      <dt>Instruction</dt>
+      <dd>{actionSummary.instruction || "—"}</dd>
+      <dt>Added nodes</dt>
+      <dd>{actionSummary.addedNodes.join(", ") || "—"}</dd>
+      <dt>Updated nodes</dt>
+      <dd>{actionSummary.updatedNodes.join(", ") || "—"}</dd>
+      <dt>Deleted nodes</dt>
+      <dd>{actionSummary.deletedNodes.join(", ") || "—"}</dd>
+      <dt>Added edges</dt>
+      <dd>{actionSummary.addedEdges.join(", ") || "—"}</dd>
+      <dt>Updated edges</dt>
+      <dd>{actionSummary.updatedEdges.join(", ") || "—"}</dd>
+      <dt>Deleted edges</dt>
+      <dd>{actionSummary.deletedEdges.join(", ") || "—"}</dd>
+      <dt>Warnings</dt>
+      <dd>{actionSummary.warnings.join("; ") || "—"}</dd>
+    </dl>
+  );
+}
+
 function StatusBar({
   status,
+  piStatus,
   graph,
   sourceMeta,
   snapshots,
   selection,
-  errorMessage
+  errorMessage,
+  unsavedChanges,
+  activeSnapshotName
 }: {
   status: LoadStatus;
+  piStatus: PiStatus;
   graph?: GraphState;
   sourceMeta?: GraphMeta;
   snapshots: SnapshotMeta[];
   selection: ElementSelection;
   errorMessage: string | null;
+  unsavedChanges: boolean;
+  activeSnapshotName: string | null;
 }) {
   const activeGraphState = graph?.stateType ?? sourceMeta?.stateType ?? "unknown";
 
@@ -545,8 +975,9 @@ function StatusBar({
       <span>Edges: {graph?.edges.length ?? sourceMeta?.edgeCount ?? 0}</span>
       <span>{selectionLabel(selection)}</span>
       <span>Snapshots: {snapshots.length}</span>
-      <span>Unsaved changes: no</span>
-      <span>Pi: idle</span>
+      <span>Active snapshot: {activeSnapshotName ?? "working"}</span>
+      <span>Unsaved changes: {unsavedChanges ? "yes" : "no"}</span>
+      <span>Pi: {piStatus}</span>
       {errorMessage ? <span className="status-error">{errorMessage}</span> : null}
     </footer>
   );

@@ -64,6 +64,13 @@ test("calculateLayout normalizes persisted coordinates and falls back for missin
   assert.ok(Number.isFinite(fallback.y));
 });
 
+test("calculateLayout can preserve already-canvas persisted coordinates for drag persistence", () => {
+  const layout = calculateLayout(graph, { preserveCanvasLayout: true });
+
+  assert.deepEqual(layout.positions.get("a"), { x: 10, y: 10 });
+  assert.deepEqual(layout.positions.get("b"), { x: 30, y: 50 });
+});
+
 test("clampZoom keeps canvas zoom inside the supported range", () => {
   assert.equal(clampZoom(0.1), 0.35);
   assert.equal(clampZoom(1.2), 1.2);

@@ -54,7 +54,7 @@ export function selectionLabel(selection: ElementSelection): string {
   return `${count} selected (${parts.join(", ")})`;
 }
 
-export function calculateLayout(graph: GraphState): { positions: Map<string, CanvasPosition> } {
+export function calculateLayout(graph: GraphState, options: { preserveCanvasLayout?: boolean } = {}): { positions: Map<string, CanvasPosition> } {
   const positions = new Map<string, CanvasPosition>();
   const sourcePositions = graph.layout ?? {};
   const sourceValues = graph.nodes.map((node) => sourcePositions[node.id]).filter((position): position is CanvasPosition => Boolean(position));
@@ -64,12 +64,17 @@ export function calculateLayout(graph: GraphState): { positions: Map<string, Can
     const maxX = Math.max(...sourceValues.map((position) => position.x));
     const minY = Math.min(...sourceValues.map((position) => position.y));
     const maxY = Math.max(...sourceValues.map((position) => position.y));
-    const width = Math.max(maxX - minX, 1);
-    const height = Math.max(maxY - minY, 1);
+    const canUseCanvasCoordinates = options.preserveCanvasLayout && minX >= 0 && minY >= 0;
 
     graph.nodes.forEach((node, index) => {
       const position = sourcePositions[node.id];
+      if (position && canUseCanvasCoordinates) {
+        positions.set(node.id, position);
+        return;
+      }
       if (position) {
+        const width = Math.max(maxX - minX, 1);
+        const height = Math.max(maxY - minY, 1);
         positions.set(node.id, {
           x: 80 + ((position.x - minX) / width) * 760,
           y: 80 + ((position.y - minY) / height) * 460

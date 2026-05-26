@@ -1,6 +1,6 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the frontend graph interaction/shared cleanup increment landed. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 editing increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
@@ -8,9 +8,18 @@ Plan-only snapshot for the first PoC, refreshed after the frontend graph interac
 - The central SVG/equivalent renderer now supports zoom, pan, local node dragging, node selection, edge selection, additive multi-select, and background clear that does not clear selection after a pan.
 - Added inspector graph summary, single-node/single-edge details, invalid/deleted selection messaging, and multi-selection summary/eligibility states.
 - Added styling hooks for origin colors, selected outlines, recent-change highlighting, warning state, and invalid state; Raw now exposes selected and changed IDs for debugging.
-- Added frontend graph-interaction helper tests for selection behavior, node/edge ID namespace isolation, selection labels, persisted-layout fallback, and zoom clamping.
+- Completed the frontend P0 editing increment: API-client mutation methods, toolbar add/delete/merge/split/save/load/duplicate/revert wiring, inspector label/type/notes edits, frontend undo/redo restores via `PUT /api/working/graph`, and drag-end layout persistence with canvas-coordinate preservation.
+- Added mutation feedback across Actions, Raw, and StatusBar so successful operations, warnings, backend errors, patch results, changed IDs, and active snapshot state are visible without corrupting the current UI graph.
+- Added frontend tests for API mutations and graph mutation helpers, in addition to the existing graph-interaction helper coverage for selection behavior, node/edge ID namespace isolation, selection labels, persisted-layout fallback, and zoom clamping.
+- Fixed reviewer findings from the editing increment: layout re-normalization, keyed inspector editors, serialized inspector saves, delete via patch warnings, active snapshot reset on undo/redo, and rejected drag reset.
 - Removed stale `packages/shared/src/index.js`; `@know-grow/shared` continues to use the source TypeScript export model through `packages/shared/src/index.ts`.
 - Final validation passed with `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
+
+## Current follow-up focus
+
+- Add DOM/App-level pointer tests for the actual React/SVG event wiring: zoom, pan, drag, drag-end persistence, selection, multi-select, and background clear.
+- Add App-level flow tests for editing, undo/redo, snapshot save/load/duplicate/revert, mutation feedback, rejected mutations, and snapshot/selection state transitions.
+- Keep the existing SVG renderer for the MVP; defer any Cytoscape.js switch until after MVP evidence shows the SVG path is insufficient.
 
 ## Confirmed current state
 
@@ -24,58 +33,29 @@ Plan-only snapshot for the first PoC, refreshed after the frontend graph interac
 - `validateGraphState` covers malformed graph shape, duplicate node IDs, duplicate edge IDs, dangling edge endpoints, and layout entries for missing nodes.
 - `validateGraphPatch`/`applyGraphPatch` now cover patch blocker/warning generation, immutable application, action summaries, changed IDs, merge/split semantics, and direct source-graph mutation blocking.
 - `fixtures/source_graph.example.json` is a checked-in non-private fixture for first render/startup fallback.
-- Frontend now has a Vite/React/TypeScript graph interaction slice: the central SVG/equivalent renderer supports zoom/pan/local node drag, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector selection states, and Raw selected/changed IDs.
+- Frontend now has a Vite/React/TypeScript graph interaction and editing slice: the MVP SVG renderer supports zoom/pan/node drag, drag-end layout persistence, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector label/type/notes edits, toolbar graph/snapshot actions, undo/redo through full working-graph replacement, mutation feedback, and Raw selected/changed IDs.
 - `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
 - `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
-- Frontend tests now cover API-client behavior and pure graph-interaction helpers; DOM/pointer interaction tests for the actual React/SVG event wiring are still needed as renderer behavior expands.
+- Frontend tests now cover API-client mutation behavior, graph mutation helpers, and pure graph-interaction helpers; DOM/App-level pointer and flow tests for the actual React/SVG/UI wiring are still needed.
 - Pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
 
-- **P0 - Complete central graph rendering and interaction follow-through.**
-  - Decide whether the current SVG/equivalent renderer is sufficient for the MVP or whether to replace it with Cytoscape.js before broader editing/Pi flows.
-  - Decide how dragged layout coordinates are persisted in the MVP: full graph replacement, snapshot save, or a later dedicated layout flow.
-  - Add DOM/pointer interaction tests for actual React/SVG zoom, pan, drag, selection, multi-select, and background-clear behavior.
+- **P0 - Add DOM/App-level frontend behavior coverage.**
+  - Cover actual React/SVG zoom, pan, drag, drag-end persistence, selection, multi-select, and background-clear behavior.
+  - Cover editing, undo/redo, snapshot save/load/duplicate/revert, mutation feedback, warning/error display, and rejected mutation recovery at the App/UI level.
+  - Keep `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build` as the required validation gates.
 
-- **P0 - Settle shared API runtime parsing and packaging direction.**
-  - Add or reuse shared schemas/types for source meta, source graph, working graph reads, and snapshots if the frontend will runtime-parse API responses with shared contracts.
-  - Decide whether `@know-grow/shared` remains source-imported by Vite/backend `tsx` or is compiled to JS/declarations for browser/runtime consumption.
+- **P0 - Settle shared API runtime parsing and packaging only as needed.**
+  - Confirm whether the frontend should runtime-parse source meta, source graph, working graph, and snapshot responses with shared schemas.
   - Validate that backend and frontend import the same shared contracts without runtime ambiguity.
 
-- **P0 - Implement frontend editing, toolbar operations, undo/redo, and snapshots.**
-  - Wire inspector edits and toolbar add/delete/merge/split through backend patch apply where possible.
-  - Keep frontend-owned `undoStack`/`redoStack` of full `GraphState` values; call `PUT /api/working/graph` for undo/redo restores.
-  - Push the prior graph before toolbar edits, inspector edits, snapshot load, source revert, applied Pi patch, and accepted Pi direct JSON edit.
-  - Connect save/load/duplicate/revert snapshot UI to backend routes; surface backend errors in StatusBar/Raw without corrupting the current UI graph.
-
-- **P0 - Expand automated validation for implemented P0 behavior.**
-  - Continue shared validation coverage for malformed graph edge cases, layout warnings, patch warning thresholds, replacement-edge conflicts, and changed-ID/source-ref conventions not yet pinned by tests.
-  - Add backend tests for health/source/working reads, fixture fallback, and no mutation on any remaining uncovered `422` paths.
-  - Expand frontend tests beyond the API client and pure helpers; add actual DOM/pointer interaction coverage for renderer zoom/pan/drag/selection/background clear, then editing, undo/redo, and snapshot flows as they land.
-  - Add pi-agent behavior tests once the HTTP bridge exists; avoid misleading green zero-test packages as functionality lands.
-  - Keep `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint` as the required validation gates.
-
-- **P1 - Implement Pi patch-mode chat.**
-  - Add mockable `POST /api/pi/chat` that defaults to patch mode, can return plain text without mutation, and can return a typed patch proposal.
-  - Do not mutate the graph in patch mode; proposal application must continue through `/api/patch/apply` after frontend/user confirmation.
-  - Surface proposed patch, validation results, action summary, raw output, and errors in the frontend Pi Panel.
-
-- **P1 - Replace the pi-agent scaffold with an HTTP bridge.**
-  - Add `GET /health` and `POST /chat` or equivalent request/response routes to `apps/pi-agent`.
-  - Pass `GRAPH_DATA_DIR=/graph-data`, capture raw Pi output, parse structured patch/direct-edit responses, and handle timeouts/errors.
-  - Have backend health report Pi availability from the bridge instead of the current static false default when configured.
-
-- **P1 - Implement Pi direct JSON mode safely.**
-  - Add `POST /api/pi/direct-edit` with backups of `working_graph.json`, `snapshots.json`, snapshot graph files as needed, and `source_graph.json` checksum protection.
-  - Invoke the pi-agent against the shared graph-data directory, then reload and validate touched graph files from disk.
-  - If output is invalid or source changed, restore backups, return `422`, and never expose corrupted graph state to the frontend.
-  - Return validated graph, snapshot metadata when changed, validation results, changed IDs, action summary/warnings, and raw Pi output.
-
-- **P1 - Complete frontend Pi Panel behavior for patch and direct JSON modes.**
-  - Implement Chat, Actions, and Raw tabs with Pi status transitions: idle, thinking, validating, applying/reloading, failed, complete.
-  - Send selected nodes/edges and current graph context to backend Pi endpoints.
-  - In direct JSON mode, push undo state before invocation and accept only the backend-reloaded validated graph; keep the last valid graph on failure.
+- **P1 - Implement Pi integration after the frontend P0 test follow-through.**
+  - Replace the pi-agent scaffold with a mockable HTTP bridge and backend health reporting.
+  - Add patch-mode chat that proposes typed patches without mutation; apply accepted proposals through `/api/patch/apply`.
+  - Add safe direct JSON mode with backups, disk reload, validation, source checksum protection, rollback on invalid output, and frontend acceptance only of backend-reloaded valid graph state.
+  - Complete the frontend Pi Panel for Chat, Actions, Raw, status transitions, selected graph context, patch proposals, direct JSON results, and errors.
 
 - **P1 - Add Docker Compose and shared graph-data mount.**
   - Add Dockerfiles for frontend, backend, and pi-agent plus `docker-compose.yml`.
@@ -98,13 +78,9 @@ Plan-only snapshot for the first PoC, refreshed after the frontend graph interac
 ## Open decisions / spec clarifications
 
 - Confirm whether the implemented merge/split edge remapping, replacement-edge conflict handling, source-ref preservation, output node defaults, and changed-element ID conventions are final before broader UI/Pi usage.
-- Choose the first MVP UX for toolbar `Merge Selected` and `Split Selected`: minimal local form/confirmation versus Pi delegation.
 - Confirm generated ID formats and uniqueness scope for user-created nodes, edges, snapshots, and patch IDs.
 - Clarify whether node IDs and edge IDs are separate namespaces or globally unique element IDs for renderer/API purposes.
 - Decide whether shared Zod schemas should remain permissive to unknown fields and empty labels/instructions, or become stricter before user-authored graph edits land.
 - Pick conservative warning thresholds for “many nodes,” “many source-derived edges,” disconnected components, and missing rationale.
 - Choose one canonical frontend direct JSON call path: `/api/pi/direct-edit` versus `/api/pi/chat` with `mode: direct_json`.
-- Decide active snapshot and unsaved-change semantics after edit, undo/redo, duplicate, load, save, source revert, patch apply, and direct JSON edit.
-- Decide whether drag/layout persistence is only through full graph replace/snapshot save or needs a dedicated layout update flow.
-- Ensure UI distinguishes immutable source graph records from editable/deletable source-origin elements inside the mutable working graph.
 - Define real pi-agent invocation protocol, timeout behavior, raw-output shape, and mock-to-real migration path.
