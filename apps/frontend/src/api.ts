@@ -7,6 +7,7 @@ import {
   healthResponseSchema,
   listSnapshotsResponseSchema,
   loadSnapshotResponseSchema,
+  piCoderResponseSchema,
   replaceWorkingGraphResponseSchema,
   revertToSourceResponseSchema,
   type ApplyPatchResponse,
@@ -19,6 +20,8 @@ import {
   type GraphState,
   type HealthResponse,
   type LoadSnapshotResponse,
+  type PiCoderRequest,
+  type PiCoderResponse,
   type ReplaceWorkingGraphResponse,
   type RevertToSourceResponse,
   type SnapshotMeta
@@ -49,6 +52,7 @@ export type FrontendApiClient = {
   duplicateSnapshot: (snapshotId: string, request: DuplicateSnapshotRequest) => Promise<DuplicateSnapshotResponse>;
   revertToSource: () => Promise<RevertToSourceResponse>;
   applyPatch: (patch: GraphPatch) => Promise<ApplyPatchResponse>;
+  piChat: (request: PiCoderRequest) => Promise<PiCoderResponse>;
 };
 
 type ApiErrorBody = {
@@ -114,7 +118,8 @@ export function createApiClient(baseUrl: string, fetchImpl: FetchLike = fetch): 
     loadSnapshot: (snapshotId) => postJson(`/snapshots/${encodeURIComponent(snapshotId)}/load`, loadSnapshotResponseSchema),
     duplicateSnapshot: (snapshotId, request) => postJson(`/snapshots/${encodeURIComponent(snapshotId)}/duplicate`, duplicateSnapshotResponseSchema, request),
     revertToSource: () => postJson("/working/revert-to-source", revertToSourceResponseSchema),
-    applyPatch: (patch) => postJson("/patch/apply", applyPatchResponseSchema, { patch })
+    applyPatch: (patch) => postJson("/patch/apply", applyPatchResponseSchema, { patch }),
+    piChat: (request) => postJson("/pi/chat", piCoderResponseSchema, request)
   };
 }
 

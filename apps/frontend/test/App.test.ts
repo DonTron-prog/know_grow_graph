@@ -16,6 +16,8 @@ import {
   type GraphState,
   type HealthResponse,
   type LoadSnapshotResponse,
+  type PiCoderRequest,
+  type PiCoderResponse,
   type ReplaceWorkingGraphResponse,
   type RevertToSourceResponse,
   type SnapshotMeta
@@ -136,6 +138,27 @@ test("App-level editing flow covers toolbar mutations, undo/redo, snapshots, and
   }
 });
 
+test("App-level Pi chat proposes a patch and applies it only after confirmation", async () => {
+  const harness = await renderHarness();
+  try {
+    await changeTextarea(document.querySelector("textarea[aria-label='Pi prompt']") as HTMLTextAreaElement, "Add review node");
+    await clickButton("Send to Pi");
+
+    await waitFor(() => assert.equal(harness.api.piChatCalls.length, 1));
+    assert.deepEqual(harness.api.piChatCalls[0]?.selectedNodeIds, []);
+    assert.equal(harness.api.graph.nodes.length, 2, "Pi proposal must not mutate before apply");
+    assert.match(document.body.textContent ?? "", /Mock Pi patch/);
+
+    harness.confirmResponses.push(true);
+    await clickButton("Apply latest Pi patch");
+    await waitFor(() => assert.equal(harness.api.applyPatchCalls.length, 1));
+    assert.ok(harness.api.graph.nodes.some((node) => node.id === "pi-review"));
+    assert.match(harness.statusText(), /Pi: complete/);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test("App-level toolbar wiring covers add edge, delete, merge, and split actions", async () => {
   const harness = await renderHarness();
   try {
@@ -237,6 +260,7 @@ class MockApiClient implements FrontendApiClient {
   snapshots: SnapshotMeta[] = [{ snapshotId: "snap-1", name: "Snapshot One", nodeCount: 1, edgeCount: 0, createdAt: "2026-05-24T00:00:00.000Z" }];
   replaceCalls: GraphState[] = [];
   applyPatchCalls: GraphPatch[] = [];
+  piChatCalls: PiCoderRequest[] = [];
   loadCalls = 0;
   revertCalls = 0;
   rejectNextReplace: ApiClientError | null = null;
@@ -306,6 +330,26 @@ class MockApiClient implements FrontendApiClient {
     }
     this.graph = structuredClone(result.graph);
     return { graph: structuredClone(this.graph), appliedPatch: patch, validationResults: result.validationResults, actionSummary: result.actionSummary, changedElementIds: result.changedElementIds };
+  }
+
+  async piChat(request: PiCoderRequest): Promise<PiCoderResponse> {
+    this.piChatCalls.push(structuredClone(request));
+    const patch: GraphPatch = {
+      patchId: "patch-pi-review",
+      instruction: request.instruction,
+      summary: "Mock Pi patch",
+      operations: [{ op: "add_node", id: "pi-review", label: "Pi Review", nodeType: "concept", origin: "llm", notes: "Mock Pi proposal.", sourceNodeIds: ["n1"] }]
+    };
+    const validation = applyGraphPatch(this.graph, patch);
+    return {
+      message: "Pi proposed a patch.",
+      mode: "patch",
+      patch,
+      actionSummary: validation.actionSummary,
+      warnings: validation.validationResults.filter((result) => result.level === "warning").map((result) => result.message),
+      validationResults: validation.validationResults,
+      rawPiOutput: { source: "test" }
+    };
   }
 }
 
@@ -453,6 +497,17 @@ async function changeAndBlur(input: HTMLInputElement, value: string): Promise<vo
   await act(async () => {
     input.value = value;
     input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  });
+}
+
+async function changeTextarea(textarea: HTMLTextAreaElement, value: string): Promise<void> {
+  assert.ok(textarea, "Missing textarea");
+  await act(async () => {
+    const TextAreaElement = textarea.ownerDocument.defaultView?.HTMLTextAreaElement;
+    const setter = TextAreaElement ? Object.getOwnPropertyDescriptor(TextAreaElement.prototype, "value")?.set : undefined;
+    setter?.call(textarea, value);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
 

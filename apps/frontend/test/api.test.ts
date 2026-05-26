@@ -85,6 +85,9 @@ test("frontend API client sends mutation requests to implemented backend endpoin
       const body = requests.at(-1)?.body as { patch?: GraphPatch } | undefined;
       return jsonResponse({ graph: sampleGraph, appliedPatch: body?.patch, validationResults: [], actionSummary: emptyActionSummary("patch"), changedElementIds: ["node-1"] });
     }
+    if (String(input).endsWith("/pi/chat")) {
+      return jsonResponse({ message: "Pi proposed a patch.", mode: "patch", patch: { patchId: "patch-pi", instruction: "Add a concept", summary: "Pi patch", operations: [] }, actionSummary: emptyActionSummary("pi"), warnings: [], validationResults: [] });
+    }
 
     return jsonResponse({ error: { code: "not_found", message: "Missing" } }, 404);
   };
@@ -97,6 +100,7 @@ test("frontend API client sends mutation requests to implemented backend endpoin
   await apiClient.duplicateSnapshot("snap-1", { name: "Copy" });
   await apiClient.revertToSource();
   await apiClient.applyPatch(patch);
+  await apiClient.piChat({ instruction: "Add a concept", selectedNodeIds: ["node-1"], selectedEdgeIds: [], graph: { nodes: sampleGraph.nodes, edges: sampleGraph.edges }, mode: "patch" });
 
   assert.deepEqual(requests.map((request) => [request.method, request.url]), [
     ["PUT", "http://backend.test/api/working/graph"],
@@ -104,10 +108,12 @@ test("frontend API client sends mutation requests to implemented backend endpoin
     ["POST", "http://backend.test/api/snapshots/snap-1/load"],
     ["POST", "http://backend.test/api/snapshots/snap-1/duplicate"],
     ["POST", "http://backend.test/api/working/revert-to-source"],
-    ["POST", "http://backend.test/api/patch/apply"]
+    ["POST", "http://backend.test/api/patch/apply"],
+    ["POST", "http://backend.test/api/pi/chat"]
   ]);
   assert.deepEqual(requests[0]?.body, { graph: sampleGraph });
   assert.deepEqual(requests[5]?.body, { patch });
+  assert.deepEqual(requests[6]?.body, { instruction: "Add a concept", selectedNodeIds: ["node-1"], selectedEdgeIds: [], graph: { nodes: sampleGraph.nodes, edges: sampleGraph.edges }, mode: "patch" });
 });
 
 test("frontend API client preserves backend ApiError details", async () => {

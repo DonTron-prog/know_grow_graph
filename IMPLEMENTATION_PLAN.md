@@ -19,6 +19,9 @@ Plan-only snapshot for the first PoC, refreshed after the completed P0 shared AP
 - Completed the P0 shared API runtime parsing increment: the frontend API client now parses successful backend responses with shared Zod schemas, exposes source graph fetch, preserves existing `ApiError` behavior, and has tests for malformed successful responses.
 - Validation passed for the shared API runtime parsing increment: `pnpm --filter @know-grow/frontend test`, `pnpm --filter @know-grow/frontend typecheck`, `pnpm --filter @know-grow/frontend lint`, `pnpm --filter @know-grow/shared typecheck`, and `pnpm --filter @know-grow/frontend build`.
 - Final full-workspace validation after the P0 runtime parsing changes passed: `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
+- Completed the first P1 Pi patch-mode integration slice: shared Pi request/response schemas, backend `/api/pi/chat` patch-mode proposal route with mock fallback plus optional pi-agent forwarding/timeout/error handling, and a mockable `apps/pi-agent` HTTP bridge with `/health` and `/api/pi/chat`.
+- Wired the frontend Pi Panel Chat flow for patch mode: prompt input with send-on-Enter/button, conversation history, selected graph context, pending typed patch proposals, Actions/Raw details, and apply-through-`/api/patch/apply` after confirmation.
+- Added focused tests for backend Pi chat no-mutation behavior, frontend API/Pi Panel proposal-then-apply behavior, and pi-agent bridge behavior.
 
 ## Current follow-up focus
 
@@ -39,18 +42,17 @@ Plan-only snapshot for the first PoC, refreshed after the completed P0 shared AP
 - Frontend now has a Vite/React/TypeScript graph interaction and editing slice: the MVP SVG renderer supports zoom/pan/node drag, drag-end layout persistence, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector label/type/notes edits, toolbar graph/snapshot actions, undo/redo through full working-graph replacement, mutation feedback, and Raw selected/changed IDs.
 - `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
 - The frontend API client parses successful backend response envelopes with shared schemas, exposes source graph fetch, preserves `ApiError` behavior for failed responses and network failures, and tests malformed successful response handling.
-- `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
+- `apps/pi-agent/src/index.js` now exposes a mock HTTP bridge with `/health` and `/api/pi/chat` that proposes typed patch-mode graph changes; there is still no Docker stack, direct-JSON workflow, or real Pi invocation protocol yet.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
 - Frontend tests now cover API-client mutation behavior, graph mutation helpers, pure graph-interaction helpers, and App-level jsdom React coverage for actual SVG selection, edge selection, multi-select, pan translate, pan-safe background clear, zoom, drag-end layout persistence, inspector edit/rejected rollback, add node, add edge, delete selected, merge selected, split selected, undo/redo, save/load/duplicate/revert snapshots, prompt/confirm queue consumption, StatusBar feedback, and rejected replacement recovery.
 - Pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
 
-- **P1 - Implement Pi integration after the frontend P0 test follow-through.**
-  - Replace the pi-agent scaffold with a mockable HTTP bridge and backend health reporting.
-  - Add patch-mode chat that proposes typed patches without mutation; apply accepted proposals through `/api/patch/apply`.
+- **P1 - Complete Pi integration beyond the patch-mode mock.**
+  - Replace the mock patch proposal behavior with the real Pi bridge protocol once the invocation contract, timeout behavior, and raw-output shape are finalized.
   - Add safe direct JSON mode with backups, disk reload, validation, source checksum protection, rollback on invalid output, and frontend acceptance only of backend-reloaded valid graph state.
-  - Complete the frontend Pi Panel for Chat, Actions, Raw, status transitions, selected graph context, patch proposals, direct JSON results, and errors.
+  - Extend the frontend Pi Panel for direct JSON results/mode selection and richer error/status transitions; patch proposals already flow through Actions/Raw and apply via `/api/patch/apply`.
 
 - **P1 - Add Docker Compose and shared graph-data mount.**
   - Add Dockerfiles for frontend, backend, and pi-agent plus `docker-compose.yml`.

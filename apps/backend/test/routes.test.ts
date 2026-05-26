@@ -412,6 +412,52 @@ test("POST /api/patch/apply persists warning-only patches", async () => {
   }
 });
 
+test("POST /api/pi/chat returns a typed patch proposal without mutating working graph", async () => {
+  const server = await startTestServer();
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const response = await postJson(`${server.baseUrl}/api/pi/chat`, {
+      instruction: "Add a review concept",
+      selectedNodeIds: ["prompting"],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "patch"
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 200);
+    assert.equal(body.mode, "patch");
+    assert.equal(body.message, "Pi proposed a patch. Review it in Actions/Raw, then apply it if acceptable.");
+    assert.match(body.patch.patchId, /^patch-/);
+    assert.deepEqual(body.patch.operations.map((operation: { op: string }) => operation.op), ["add_node", "add_edge"]);
+    assert.equal(body.actionSummary.addedNodes.length, 1);
+    assert.deepEqual(persisted, original);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/pi/chat rejects direct JSON mode on the patch chat route", async () => {
+  const server = await startTestServer();
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const response = await postJson(`${server.baseUrl}/api/pi/chat`, {
+      instruction: "Edit files directly",
+      selectedNodeIds: [],
+      selectedEdgeIds: [],
+      graph: { nodes: original.nodes, edges: original.edges },
+      mode: "direct_json"
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(body.error.code, "direct_json_not_supported");
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /api/patch/apply returns 422 and does not persist invalid patches", async () => {
   const server = await startTestServer();
   try {

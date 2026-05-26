@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import type { ActionSummary, GraphEdge, GraphMeta, GraphNode, GraphState, SnapshotMeta } from "@know-grow/shared";
+import type { ActionSummary, GraphEdge, GraphMeta, GraphNode, GraphPatch, GraphState, SnapshotMeta } from "@know-grow/shared";
 import { ApiClientError, type FrontendApiClient } from "./api.js";
 import {
   addEdgeToGraph,
@@ -27,6 +27,7 @@ import {
 type LoadStatus = "loading" | "ready" | "error";
 type PiTab = "chat" | "actions" | "raw";
 type PiStatus = "idle" | "thinking" | "validating" | "applying/reloading" | "failed" | "complete";
+type PiMessage = { role: "user" | "assistant"; content: string };
 
 type AppProps = {
   apiClient: FrontendApiClient;
@@ -60,6 +61,9 @@ export function App({ apiClient }: AppProps) {
   const [activeSnapshotName, setActiveSnapshotName] = useState<string | null>(null);
   const [lastActionSummary, setLastActionSummary] = useState<ActionSummary | null>(null);
   const [rawDetails, setRawDetails] = useState<unknown>(null);
+  const [piPrompt, setPiPrompt] = useState("");
+  const [piMessages, setPiMessages] = useState<PiMessage[]>([]);
+  const [pendingPiPatch, setPendingPiPatch] = useState<GraphPatch | null>(null);
   const [inspectorResetVersion, setInspectorResetVersion] = useState(0);
   const graphRef = useRef<GraphState | null>(null);
   const mutationQueueRef = useRef(Promise.resolve());
@@ -384,6 +388,61 @@ export function App({ apiClient }: AppProps) {
     await persistMutation({ graph, actionSummary, changedElementIds: [] });
   }
 
+  async function handleSendPiPrompt(): Promise<void> {
+    if (!data) return;
+    const instruction = piPrompt.trim();
+    if (!instruction) return;
+
+    setPiStatus("thinking");
+    setPiMessages((messages) => [...messages, { role: "user", content: instruction }]);
+    setPiPrompt("");
+    try {
+      const response = await apiClient.piChat({
+        instruction,
+        selectedNodeIds: selection.nodeIds,
+        selectedEdgeIds: selection.edgeIds,
+        graph: {
+          nodes: data.workingGraph.nodes,
+          edges: data.workingGraph.edges
+        },
+        mode: "patch"
+      });
+      setPiMessages((messages) => [...messages, { role: "assistant", content: response.message }]);
+      setPendingPiPatch(response.patch ?? null);
+      setLastActionSummary(response.actionSummary ?? null);
+      setRawDetails(response);
+      setErrorMessage(null);
+      setPiStatus("complete");
+      if (response.patch || response.actionSummary) {
+        setActivePiTab("actions");
+      }
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
+  async function handleApplyPiPatch(): Promise<void> {
+    if (!pendingPiPatch) return;
+    if (!confirm("Apply the latest Pi patch proposal to the working graph?")) return;
+
+    setPiStatus("validating");
+    try {
+      const response = await apiClient.applyPatch(pendingPiPatch);
+      acceptWorkingGraph(response.graph, {
+        pushUndo: true,
+        changedIds: response.changedElementIds,
+        actionSummary: response.actionSummary,
+        raw: { proposal: rawDetails, response },
+        unsaved: true
+      });
+      setPendingPiPatch(null);
+      setSelection(EMPTY_SELECTION);
+      setActivePiTab("actions");
+    } catch (error) {
+      rememberError(error);
+    }
+  }
+
   return (
     <main className="app-shell" aria-label="Snapshot Multi-View Knowledge Graph Workbench">
       <TopToolbar
@@ -404,7 +463,7 @@ export function App({ apiClient }: AppProps) {
       <section className="main-grid" aria-label="Workbench regions">
         <InspectorPanel key={inspectorResetVersion} selection={selection} graph={data?.workingGraph} nodes={selectedNodes} edges={selectedEdges} unsavedChanges={unsavedChanges} activeSnapshotName={activeSnapshotName} onNodeUpdate={handleNodeUpdate} onEdgeUpdate={handleEdgeUpdate} />
         <GraphCanvas graph={data?.workingGraph} status={status} selected={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} onSelect={setSelection} onLayoutChange={handleLayoutChange} />
-        <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} piStatus={piStatus} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} actionSummary={lastActionSummary} rawDetails={rawDetails} />
+        <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} piStatus={piStatus} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} actionSummary={lastActionSummary} rawDetails={rawDetails} piPrompt={piPrompt} piMessages={piMessages} pendingPiPatch={pendingPiPatch} onPiPromptChange={setPiPrompt} onSendPiPrompt={handleSendPiPrompt} onApplyPiPatch={handleApplyPiPatch} />
       </section>
       <StatusBar
         status={status}
@@ -878,7 +937,13 @@ function PiPanel({
   changedElementIds,
   errorMessage,
   actionSummary,
-  rawDetails
+  rawDetails,
+  piPrompt,
+  piMessages,
+  pendingPiPatch,
+  onPiPromptChange,
+  onSendPiPrompt,
+  onApplyPiPatch
 }: {
   activeTab: PiTab;
   onTabChange: (tab: PiTab) => void;
@@ -890,6 +955,12 @@ function PiPanel({
   errorMessage: string | null;
   actionSummary: ActionSummary | null;
   rawDetails: unknown;
+  piPrompt: string;
+  piMessages: PiMessage[];
+  pendingPiPatch: GraphPatch | null;
+  onPiPromptChange: (value: string) => void;
+  onSendPiPrompt: () => void;
+  onApplyPiPatch: () => void;
 }) {
   return (
     <aside className="panel pi-panel" aria-label="Pi panel">
@@ -903,15 +974,41 @@ function PiPanel({
       </div>
       {activeTab === "chat" ? (
         <div className="tab-panel">
-          <EmptyState title="Pi chat not connected yet" body="Manual graph edits now use the same validated working graph and patch pathways that Pi proposals will use next." />
-          <textarea disabled placeholder="Ask Pi to transform the graph…" />
-          <button type="button" disabled>Send to Pi</button>
+          <div className="pi-message-list" aria-label="Pi conversation history">
+            {piMessages.length === 0 ? (
+              <EmptyState title="Ask Pi for a graph patch" body="Patch mode proposes typed graph changes without mutating the working graph until you apply them." />
+            ) : (
+              piMessages.map((message, index) => (
+                <p key={`${message.role}-${index}`} className={`pi-message ${message.role}`}>
+                  <strong>{message.role === "user" ? "You" : "Pi"}:</strong> {message.content}
+                </p>
+              ))
+            )}
+          </div>
+          <textarea
+            value={piPrompt}
+            onChange={(event) => onPiPromptChange(event.target.value)}
+            onInput={(event) => onPiPromptChange(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                onSendPiPrompt();
+              }
+            }}
+            placeholder="Ask Pi to transform the graph…"
+            aria-label="Pi prompt"
+          />
+          <div className="pi-controls">
+            <button type="button" onClick={onSendPiPrompt} disabled={!graph || !piPrompt.trim() || piStatus === "thinking"}>Send to Pi</button>
+            <button type="button" onClick={onApplyPiPatch} disabled={!pendingPiPatch || piStatus === "thinking"}>Apply latest Pi patch</button>
+          </div>
           <span>Pi status: {piStatus}</span>
         </div>
       ) : null}
       {activeTab === "actions" ? (
         <div className="tab-panel">
           {actionSummary ? <ActionSummaryView actionSummary={actionSummary} /> : <EmptyState title="No proposed actions" body="Patch summaries and validation warnings appear here after toolbar, inspector, snapshot, or Pi mutations." />}
+          {pendingPiPatch ? <button type="button" onClick={onApplyPiPatch} disabled={piStatus === "thinking"}>Apply latest Pi patch</button> : null}
         </div>
       ) : null}
       {activeTab === "raw" ? (

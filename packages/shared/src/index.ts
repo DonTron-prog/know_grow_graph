@@ -239,6 +239,33 @@ export const revertToSourceResponseSchema = z.object({
   actionSummary: actionSummarySchema
 });
 
+export const piEditModeSchema = z.enum(["patch", "direct_json"]);
+
+export const piCoderRequestSchema = z.object({
+  instruction: z.string(),
+  selectedNodeIds: z.array(z.string()),
+  selectedEdgeIds: z.array(z.string()),
+  graph: z.object({
+    nodes: z.array(graphNodeSchema),
+    edges: z.array(graphEdgeSchema)
+  }),
+  snapshot: snapshotMetaSchema.optional(),
+  mode: piEditModeSchema.optional()
+});
+
+export const piCoderResponseSchema = z.object({
+  message: z.string(),
+  mode: piEditModeSchema,
+  patch: graphPatchSchema.optional(),
+  graph: graphStateSchema.optional(),
+  snapshots: z.array(snapshotMetaSchema).optional(),
+  actionSummary: actionSummarySchema.optional(),
+  warnings: z.array(z.string()).optional(),
+  validationResults: z.array(validationResultSchema).optional(),
+  changedElementIds: z.array(z.string()).optional(),
+  rawPiOutput: z.unknown().optional()
+});
+
 export type GraphNode = z.infer<typeof graphNodeSchema>;
 export type GraphEdge = z.infer<typeof graphEdgeSchema>;
 export type GraphState = z.infer<typeof graphStateSchema>;
@@ -264,6 +291,9 @@ export type LoadSnapshotResponse = z.infer<typeof loadSnapshotResponseSchema>;
 export type DuplicateSnapshotRequest = z.infer<typeof duplicateSnapshotRequestSchema>;
 export type DuplicateSnapshotResponse = z.infer<typeof duplicateSnapshotResponseSchema>;
 export type RevertToSourceResponse = z.infer<typeof revertToSourceResponseSchema>;
+export type PiEditMode = z.infer<typeof piEditModeSchema>;
+export type PiCoderRequest = z.infer<typeof piCoderRequestSchema>;
+export type PiCoderResponse = z.infer<typeof piCoderResponseSchema>;
 
 export function graphMetaFromState(graph: GraphState, readOnly = graph.stateType === "source"): GraphMeta {
   return {

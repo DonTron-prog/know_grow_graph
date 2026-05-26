@@ -10,12 +10,17 @@ import {
   graphMetaFromState,
   hasBlockers,
   parseGraphState,
+  piCoderRequestSchema,
+  piCoderResponseSchema,
   replaceWorkingGraphRequestSchema,
   validateGraphPatch,
   validateGraphState,
   validatePatchRequestSchema,
   type ActionSummary,
+  type GraphPatch,
   type GraphState,
+  type PiCoderRequest,
+  type PiCoderResponse,
   type SnapshotMeta,
   type ValidationResult
 } from "@know-grow/shared";
@@ -35,6 +40,8 @@ export type CreateAppOptions = {
   paths: BackendPaths;
   version?: string;
   piCoderAvailable?: boolean;
+  piAgentUrl?: string;
+  piRequestTimeoutMs?: number;
 };
 
 class HttpError extends Error {
@@ -163,15 +170,123 @@ async function loadValidSnapshotGraph(paths: BackendPaths, snapshotId: string): 
   return parseGraphState(snapshotInput);
 }
 
+function normalizePiAgentUrl(piAgentUrl: string): string {
+  return piAgentUrl.endsWith("/") ? piAgentUrl.slice(0, -1) : piAgentUrl;
+}
+
+function createMockPiPatch(request: PiCoderRequest, workingGraph: GraphState): GraphPatch {
+  const anchorNodeId = request.selectedNodeIds.find((id) => workingGraph.nodes.some((node) => node.id === id)) ?? workingGraph.nodes[0]?.id;
+  const nodeId = uniqueElementId(workingGraph, "node", `pi-${slugify(request.instruction) || "suggestion"}`);
+  const operations: GraphPatch["operations"] = [
+    {
+      op: "add_node",
+      id: nodeId,
+      label: request.instruction.trim() ? `Pi: ${request.instruction.trim().slice(0, 48)}` : "Pi suggested concept",
+      nodeType: "concept",
+      origin: "llm",
+      notes: "Mock Pi patch proposal. Review and apply through the patch endpoint.",
+      ...(anchorNodeId ? { sourceNodeIds: [anchorNodeId] } : {})
+    }
+  ];
+
+  if (anchorNodeId) {
+    operations.push({
+      op: "add_edge",
+      id: uniqueElementId(workingGraph, "edge", `edge-${anchorNodeId}-${nodeId}`),
+      source: anchorNodeId,
+      target: nodeId,
+      label: "suggests",
+      origin: "llm",
+      notes: "Mock Pi relationship from selected or first node."
+    });
+  }
+
+  return {
+    patchId: `patch-${randomUUID()}`,
+    instruction: request.instruction,
+    summary: "Mock Pi patch proposal",
+    operations
+  };
+}
+
+function uniqueElementId(graph: GraphState, kind: "node" | "edge", preferredId: string): string {
+  const existing = new Set((kind === "node" ? graph.nodes : graph.edges).map((element) => element.id));
+  const safePreferred = preferredId.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || `pi-${kind}`;
+  if (!existing.has(safePreferred)) {
+    return safePreferred;
+  }
+
+  for (let index = 2; ; index += 1) {
+    const candidate = `${safePreferred}-${index}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
+}
+
+function slugify(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36);
+}
+
+function responseFromPatch(request: PiCoderRequest, workingGraph: GraphState, patch: GraphPatch, rawPiOutput?: unknown): PiCoderResponse {
+  const validation = validateGraphPatch(workingGraph, patch);
+  const warnings = validation.validationResults.filter((result) => result.level === "warning").map((result) => result.message);
+  return {
+    message: hasBlockers(validation.validationResults)
+      ? "Pi proposed a patch, but validation found blockers. The working graph was not changed."
+      : "Pi proposed a patch. Review it in Actions/Raw, then apply it if acceptable.",
+    mode: "patch",
+    patch,
+    actionSummary: validation.actionSummary,
+    warnings,
+    validationResults: validation.validationResults,
+    rawPiOutput
+  };
+}
+
+async function requestPiAgent(piAgentUrl: string, request: PiCoderRequest, timeoutMs: number): Promise<PiCoderResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${normalizePiAgentUrl(piAgentUrl)}/api/pi/chat`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal: controller.signal
+    });
+    const body = await response.json().catch(() => undefined) as unknown;
+    if (!response.ok) {
+      throw new HttpError(502, "pi_agent_error", `Pi agent returned HTTP ${response.status}.`, body);
+    }
+    const parsed = piCoderResponseSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(502, "invalid_pi_response", "Pi agent returned an invalid response shape.", { issues: parsed.error.issues, body });
+    }
+    return parsed.data;
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new HttpError(504, "pi_agent_timeout", `Pi agent did not respond within ${timeoutMs}ms.`);
+    }
+    throw new HttpError(502, "pi_agent_unavailable", error instanceof Error ? error.message : "Pi agent is unavailable.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function createApp(options: CreateAppOptions): express.Express {
   const app = express();
   const version = options.version ?? "0.1.0";
+  const piAgentUrl = options.piAgentUrl ?? process.env.PI_AGENT_URL;
+  const piRequestTimeoutMs = options.piRequestTimeoutMs ?? Number(process.env.PI_REQUEST_TIMEOUT_MS ?? 10_000);
 
   app.use(cors());
   app.use(express.json({ limit: "10mb" }));
 
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, version, piCoderAvailable: options.piCoderAvailable ?? false });
+    res.json({ ok: true, version, piCoderAvailable: options.piCoderAvailable ?? Boolean(piAgentUrl) });
   });
 
   app.get(
@@ -291,6 +406,38 @@ export function createApp(options: CreateAppOptions): express.Express {
         actionSummary: patchResult.actionSummary,
         changedElementIds: patchResult.changedElementIds
       });
+    })
+  );
+
+  app.post(
+    "/api/pi/chat",
+    asyncRoute(async (req, res) => {
+      const parsedRequest = piCoderRequestSchema.safeParse(req.body);
+      if (!parsedRequest.success) {
+        throw badRequestFromZod(parsedRequest.error.issues);
+      }
+
+      const request = { ...parsedRequest.data, mode: parsedRequest.data.mode ?? "patch" } satisfies PiCoderRequest;
+      if (request.mode === "direct_json") {
+        throw new HttpError(400, "direct_json_not_supported", "Use /api/pi/direct-edit for direct JSON mode when that workflow is enabled.");
+      }
+
+      const workingGraph = await loadWorkingGraph(options.paths);
+      if (!piAgentUrl) {
+        res.json(responseFromPatch(request, workingGraph, createMockPiPatch(request, workingGraph), { source: "backend_mock" }));
+        return;
+      }
+
+      const piResponse = await requestPiAgent(piAgentUrl, request, piRequestTimeoutMs);
+      if (piResponse.mode !== "patch") {
+        throw new HttpError(502, "invalid_pi_response", "Pi chat bridge must return patch mode for /api/pi/chat.", piResponse);
+      }
+      if (!piResponse.patch) {
+        res.json({ ...piResponse, mode: "patch" });
+        return;
+      }
+
+      res.json(responseFromPatch(request, workingGraph, piResponse.patch, piResponse.rawPiOutput ?? piResponse));
     })
   );
 
