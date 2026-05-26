@@ -122,7 +122,7 @@ Local generated data should also stay out of git, for example:
 .data/
 ```
 
-For the containerized local stack, mount this host directory into both backend and Pi at a shared path such as:
+For the containerized local stack, `docker-compose.yml` mounts this host directory into both backend and Pi at the same shared path:
 
 ```text
 ./.data -> backend:/graph-data
@@ -130,6 +130,33 @@ For the containerized local stack, mount this host directory into both backend a
 ```
 
 Pi may read and write the mutable files in `/graph-data`, especially `working_graph.json` and snapshot JSON files. `source_graph.json` remains immutable by application rule and should be protected by backend checksum/restore checks during direct JSON mode.
+
+## Docker Compose Local Stack
+
+The compose stack is useful because it runs backend and pi-agent with the required shared graph-data mount before direct JSON editing is enabled.
+
+```bash
+mkdir -p .data
+docker compose up --build
+# If your Docker installation uses the legacy Compose CLI:
+docker-compose up --build
+```
+
+Services:
+
+- frontend: <http://localhost:5173>
+- backend health: <http://localhost:3001/api/health>
+- pi-agent health: <http://localhost:4100/health>
+
+If those ports are already in use, override only the host ports, for example:
+
+```bash
+BACKEND_HOST_PORT=3101 FRONTEND_HOST_PORT=5174 PI_AGENT_HOST_PORT=4101 \
+  VITE_API_BASE_URL=http://localhost:3101/api \
+  docker-compose up --build
+```
+
+The backend uses `DATA_DIR=/graph-data` and fixture fallback from `/app/fixtures/source_graph.example.json`. The pi-agent uses `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` Docker volume for future Pi config/session state instead of the host home directory.
 
 ## Implementation Principle
 

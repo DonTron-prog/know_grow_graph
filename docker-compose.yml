@@ -1,0 +1,71 @@
+version: "2.4"
+
+services:
+  pi-agent:
+    build:
+      context: .
+      dockerfile: apps/pi-agent/Dockerfile
+    environment:
+      PI_AGENT_PORT: "4100"
+      GRAPH_DATA_DIR: /graph-data
+      PI_CODING_AGENT_DIR: /pi-agent-state
+      PI_OFFLINE: "${PI_OFFLINE:-1}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+    volumes:
+      - ./.data:/graph-data
+      - pi-agent-state:/pi-agent-state
+    ports:
+      - "${PI_AGENT_HOST_PORT:-4100}:4100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      BACKEND_PORT: "3001"
+      DATA_DIR: /graph-data
+      FIXTURE_GRAPH_PATH: /app/fixtures/source_graph.example.json
+      PI_AGENT_URL: http://pi-agent:4100
+      PI_REQUEST_TIMEOUT_MS: "10000"
+    volumes:
+      - ./.data:/graph-data
+    ports:
+      - "${BACKEND_HOST_PORT:-3001}:3001"
+    depends_on:
+      pi-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    environment:
+      VITE_API_BASE_URL: "${VITE_API_BASE_URL:-http://localhost:3001/api}"
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pi-agent-state:

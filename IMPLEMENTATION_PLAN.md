@@ -1,6 +1,6 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the completed P0 shared API runtime parsing increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the completed Docker Compose/shared graph-data increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
@@ -22,6 +22,9 @@ Plan-only snapshot for the first PoC, refreshed after the completed P0 shared AP
 - Completed the first P1 Pi patch-mode integration slice: shared Pi request/response schemas, backend `/api/pi/chat` patch-mode proposal route with mock fallback plus optional pi-agent forwarding/timeout/error handling, and a mockable `apps/pi-agent` HTTP bridge with `/health` and `/api/pi/chat`.
 - Wired the frontend Pi Panel Chat flow for patch mode: prompt input with send-on-Enter/button, conversation history, selected graph context, pending typed patch proposals, Actions/Raw details, and apply-through-`/api/patch/apply` after confirmation.
 - Added focused tests for backend Pi chat no-mutation behavior, frontend API/Pi Panel proposal-then-apply behavior, and pi-agent bridge behavior.
+- Completed the Docker Compose/shared graph-data increment: added Dockerfiles for backend, frontend, and pi-agent; added `docker-compose.yml` with backend and pi-agent sharing host `./.data` at `/graph-data`; configured backend with `DATA_DIR=/graph-data` and `PI_AGENT_URL=http://pi-agent:4100`; configured pi-agent with `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` volume.
+- Frontend startup now pins Vite to `--port 5173` so Docker health checks, port mappings, and docs remain stable.
+- Validation passed after the Docker increment: `docker-compose config`, `docker-compose build`, compose smoke with alternate host ports because `localhost:3001` was already in use (`BACKEND_HOST_PORT=3101 FRONTEND_HOST_PORT=5174 PI_AGENT_HOST_PORT=4101 VITE_API_BASE_URL=http://localhost:3101/api`), pi-agent `/health`, backend `/api/health`, backend `/api/working/graph`, backend-to-pi-agent `/api/pi/chat` forwarding, frontend root HTML, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
 
 ## Current follow-up focus
 
@@ -42,22 +45,18 @@ Plan-only snapshot for the first PoC, refreshed after the completed P0 shared AP
 - Frontend now has a Vite/React/TypeScript graph interaction and editing slice: the MVP SVG renderer supports zoom/pan/node drag, drag-end layout persistence, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector label/type/notes edits, toolbar graph/snapshot actions, undo/redo through full working-graph replacement, mutation feedback, and Raw selected/changed IDs.
 - `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
 - The frontend API client parses successful backend response envelopes with shared schemas, exposes source graph fetch, preserves `ApiError` behavior for failed responses and network failures, and tests malformed successful response handling.
-- `apps/pi-agent/src/index.js` now exposes a mock HTTP bridge with `/health` and `/api/pi/chat` that proposes typed patch-mode graph changes; there is still no Docker stack, direct-JSON workflow, or real Pi invocation protocol yet.
+- `apps/pi-agent/src/index.js` now exposes a mock HTTP bridge with `/health` and `/api/pi/chat` that proposes typed patch-mode graph changes; direct-JSON workflow and real Pi invocation protocol are still not implemented.
+- Dockerfiles exist for backend, frontend, and pi-agent. `docker-compose.yml` runs the stack with backend and pi-agent sharing host `./.data` at `/graph-data`; backend uses `DATA_DIR=/graph-data` and `PI_AGENT_URL=http://pi-agent:4100`; pi-agent uses `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` volume.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
 - Frontend tests now cover API-client mutation behavior, graph mutation helpers, pure graph-interaction helpers, and App-level jsdom React coverage for actual SVG selection, edge selection, multi-select, pan translate, pan-safe background clear, zoom, drag-end layout persistence, inspector edit/rejected rollback, add node, add edge, delete selected, merge selected, split selected, undo/redo, save/load/duplicate/revert snapshots, prompt/confirm queue consumption, StatusBar feedback, and rejected replacement recovery.
-- Pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
+- Pi-agent bridge behavior has focused test coverage.
 
 ## Prioritized remaining work
 
 - **P1 - Complete Pi integration beyond the patch-mode mock.**
   - Replace the mock patch proposal behavior with the real Pi bridge protocol once the invocation contract, timeout behavior, and raw-output shape are finalized.
-  - Add safe direct JSON mode with backups, disk reload, validation, source checksum protection, rollback on invalid output, and frontend acceptance only of backend-reloaded valid graph state.
+  - Add safe direct JSON backend/frontend mode with backups, disk reload, validation, source checksum protection, rollback on invalid output, and frontend acceptance only of backend-reloaded valid graph state.
   - Extend the frontend Pi Panel for direct JSON results/mode selection and richer error/status transitions; patch proposals already flow through Actions/Raw and apply via `/api/patch/apply`.
-
-- **P1 - Add Docker Compose and shared graph-data mount.**
-  - Add Dockerfiles for frontend, backend, and pi-agent plus `docker-compose.yml`.
-  - Mount host `./.data` into backend and pi-agent at `/graph-data`; keep Pi config/session storage isolated from host home and committed files.
-  - Smoke-test backend and pi-agent against the same `working_graph.json` path.
 
 - **P2 - Document and run a manual visual smoke path.**
   - Document load, select, drag, add, edit, delete, merge, split, undo/redo, snapshot save/load/duplicate/revert, mock Pi patch, direct JSON edit, and invalid edit recovery steps.
