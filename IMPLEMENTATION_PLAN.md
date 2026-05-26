@@ -1,6 +1,6 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the shared patch engine and backend patch endpoints landed. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the backend snapshot/source-revert increment landed. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
@@ -8,24 +8,27 @@ Plan-only snapshot for the first PoC, refreshed after the shared patch engine an
 - Added patch blockers, warnings, `ActionSummary`, and `changedElementIds` handling, with shared tests for valid/invalid patch behavior and merge/split coverage.
 - Implemented backend `POST /api/patch/validate` and `POST /api/patch/apply` using the shared patch engine.
 - Ensured patch apply persists only accepted mutations and returns `422` without mutating `working_graph.json` when blockers exist.
-- Added backend route tests for patch validate/apply success, validation-only no-mutation behavior, invalid apply no-mutation behavior, and changed IDs.
-- Validation run passed: `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint`.
+- Added snapshot graph-file persistence under `snapshots/<snapshotId>.json` plus source-revert and snapshot save/get/load/duplicate routes.
+- Added shared schemas/types for source revert, snapshot create/get/load/duplicate requests and responses.
+- Added backend route tests covering snapshot save/list/get/load/duplicate/revert, invalid create/duplicate request-body ApiError handling, validation/no-mutation paths, missing snapshot `404`, and source immutability preservation.
+- Final validation passed with `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint`.
 
 ## Confirmed current state
 
 - The implementation lives under `apps/*` and `packages/*`; root `src/` and `src/lib/` are placeholders only.
 - `apps/backend/src/app.ts` exposes a modular `createApp(...)`; `apps/backend/src/persistence.ts` owns disk-backed JSON initialization/read/write; `apps/backend/src/index.ts` only starts the server.
-- Backend currently implements `GET /api/health`, `GET /api/source/meta`, `GET /api/source/graph`, `GET /api/working/graph`, `PUT /api/working/graph`, `GET /api/snapshots`, `POST /api/patch/validate`, and `POST /api/patch/apply`.
+- Backend currently implements `GET /api/health`, `GET /api/source/meta`, `GET /api/source/graph`, `GET /api/working/graph`, `PUT /api/working/graph`, `POST /api/working/revert-to-source`, `GET /api/snapshots`, `POST /api/snapshots`, `GET /api/snapshots/:snapshotId`, `POST /api/snapshots/:snapshotId/load`, `POST /api/snapshots/:snapshotId/duplicate`, `POST /api/patch/validate`, and `POST /api/patch/apply`.
 - Implemented backend routes already follow the desired conventions: spec-shaped replacement and patch requests, validation/action-summary responses, `{ snapshots }` list responses, and `{ error: { code, message, details? } }` API errors.
-- Backend graph reads are disk-backed per request, which should be preserved so later Pi direct-file edits can be reloaded instead of hidden behind an in-memory cache.
-- `packages/shared/src/index.ts` defines canonical graph, snapshot, patch-operation, validation-result, action-summary, and some API envelope schemas/types.
+- Backend graph reads are disk-backed per request, and snapshot graph files are persisted separately under `snapshots/<snapshotId>.json`; this should be preserved so later Pi direct-file edits can be reloaded instead of hidden behind an in-memory cache.
+- Source graph immutability is preserved by working-graph edits, source revert, snapshot load/duplicate flows, and validation/no-mutation failure paths.
+- `packages/shared/src/index.ts` defines canonical graph, snapshot, patch-operation, validation-result, action-summary, source/working graph, source revert, and snapshot API envelope schemas/types.
 - `validateGraphState` covers malformed graph shape, duplicate node IDs, duplicate edge IDs, dangling edge endpoints, and layout entries for missing nodes.
 - `validateGraphPatch`/`applyGraphPatch` now cover patch blocker/warning generation, immutable application, action summaries, changed IDs, merge/split semantics, and direct source-graph mutation blocking.
 - `fixtures/source_graph.example.json` is a checked-in non-private fixture for first render/startup fallback.
 - Frontend now has a Vite/React/TypeScript read-only vertical slice and API-client behavior tests, but graph interaction is still the simple SVG implementation rather than Cytoscape/equivalent canvas behavior.
 - `packages/shared/src/index.js` is still a stale Phase 1 placeholder runtime file while package exports point at `./src/index.ts`; settle runtime/browser consumption and remove or neutralize this stale file during shared packaging cleanup.
 - `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
-- Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints as well as existing replacement/error routes.
+- Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
 - Frontend tests now cover API-client behavior; pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
@@ -41,12 +44,6 @@ Plan-only snapshot for the first PoC, refreshed after the shared patch engine an
   - Remove or neutralize the stale `packages/shared/src/index.js` placeholder as part of packaging cleanup.
   - Validate that backend and frontend import the same shared contracts without runtime ambiguity.
 
-- **P0 - Implement backend snapshot mutation and source-revert routes.**
-  - Add snapshot graph-file persistence under `snapshots/<snapshotId>.json` plus metadata updates in `snapshots.json`.
-  - Implement `POST /api/working/revert-to-source`, `POST /api/snapshots`, `GET /api/snapshots/:snapshotId`, `POST /api/snapshots/:snapshotId/load`, and `POST /api/snapshots/:snapshotId/duplicate`.
-  - Validate loaded/replaced graph states, preserve source immutability, and return action summaries for load/revert flows.
-  - Test save/list/get/load/duplicate/revert, missing snapshot `404`, invalid snapshot no-mutation, and source graph unchanged after working edits.
-
 - **P0 - Implement frontend editing, toolbar operations, undo/redo, and snapshots.**
   - Wire inspector edits and toolbar add/delete/merge/split through backend patch apply where possible.
   - Keep frontend-owned `undoStack`/`redoStack` of full `GraphState` values; call `PUT /api/working/graph` for undo/redo restores.
@@ -55,7 +52,7 @@ Plan-only snapshot for the first PoC, refreshed after the shared patch engine an
 
 - **P0 - Expand automated validation for implemented P0 behavior.**
   - Continue shared validation coverage for malformed graph edge cases, layout warnings, patch warning thresholds, replacement-edge conflicts, and changed-ID/source-ref conventions not yet pinned by tests.
-  - Add backend tests for health/source/working reads, fixture fallback, source immutability, snapshot/revert endpoints, and no mutation on remaining `422` paths.
+  - Add backend tests for health/source/working reads, fixture fallback, and no mutation on any remaining uncovered `422` paths.
   - Expand frontend tests beyond the API client as renderer interaction, selection state, editing, undo/redo, and snapshot flows land.
   - Add pi-agent behavior tests once the HTTP bridge exists; avoid misleading green zero-test packages as functionality lands.
   - Keep `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint` as the required validation gates.

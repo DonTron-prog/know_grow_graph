@@ -33,6 +33,14 @@ async function readWorkingGraph(path: string): Promise<GraphState> {
   return JSON.parse(await readFile(path, "utf8")) as GraphState;
 }
 
+async function postJson(url: string, body: unknown): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
 test("GET /api/snapshots returns the spec envelope", async () => {
   const server = await startTestServer();
   try {
@@ -41,6 +49,187 @@ test("GET /api/snapshots returns the spec envelope", async () => {
 
     assert.equal(response.status, 200);
     assert.deepEqual(body, { snapshots: [] });
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/snapshots saves current working graph and GET returns the snapshot graph", async () => {
+  const server = await startTestServer();
+  try {
+    const working = await readWorkingGraph(server.paths.workingGraph);
+    const layout = { prompting: { x: 10, y: 20 } };
+
+    const createResponse = await postJson(`${server.baseUrl}/api/snapshots`, {
+      name: "First saved view",
+      notes: "Captures the graph before experiments.",
+      layout
+    });
+    const createBody = await createResponse.json();
+
+    assert.equal(createResponse.status, 201);
+    assert.match(createBody.snapshot.snapshotId, /^snapshot-/);
+    assert.equal(createBody.snapshot.name, "First saved view");
+    assert.equal(createBody.snapshot.nodeCount, working.nodes.length);
+    assert.equal(createBody.snapshot.edgeCount, working.edges.length);
+
+    const listResponse = await fetch(`${server.baseUrl}/api/snapshots`);
+    const listBody = await listResponse.json();
+    assert.deepEqual(listBody.snapshots, [createBody.snapshot]);
+
+    const getResponse = await fetch(`${server.baseUrl}/api/snapshots/${createBody.snapshot.snapshotId}`);
+    const getBody = await getResponse.json();
+    assert.equal(getResponse.status, 200);
+    assert.deepEqual(getBody.snapshot, createBody.snapshot);
+    assert.equal(getBody.graph.stateType, "snapshot");
+    assert.equal(getBody.graph.graphId, createBody.snapshot.snapshotId);
+    assert.equal(getBody.graph.name, "First saved view");
+    assert.deepEqual(getBody.graph.layout, layout);
+  } finally {
+    await server.close();
+  }
+});
+
+test("snapshot load replaces only the working graph and returns an action summary", async () => {
+  const server = await startTestServer();
+  try {
+    const originalSource = await readFile(server.paths.sourceGraph, "utf8");
+    const originalWorking = await readWorkingGraph(server.paths.workingGraph);
+    const snapshotResponse = await postJson(`${server.baseUrl}/api/snapshots`, { name: "Before edits" });
+    const { snapshot } = await snapshotResponse.json();
+
+    const editedWorking: GraphState = {
+      ...originalWorking,
+      name: "Edited after snapshot",
+      nodes: [...originalWorking.nodes, { id: "after-snapshot", label: "After Snapshot", type: "concept", origin: "human" }]
+    };
+    await fetch(`${server.baseUrl}/api/working/graph`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ graph: editedWorking })
+    });
+
+    const loadResponse = await postJson(`${server.baseUrl}/api/snapshots/${snapshot.snapshotId}/load`, {});
+    const loadBody = await loadResponse.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+    const sourceAfter = await readFile(server.paths.sourceGraph, "utf8");
+
+    assert.equal(loadResponse.status, 200);
+    assert.equal(loadBody.snapshot.snapshotId, snapshot.snapshotId);
+    assert.equal(loadBody.graph.stateType, "working");
+    assert.equal(loadBody.graph.name, "Before edits");
+    assert.ok(!loadBody.graph.nodes.some((node: { id: string }) => node.id === "after-snapshot"));
+    assert.equal(loadBody.actionSummary.title, "Loaded snapshot 'Before edits'");
+    assert.deepEqual(loadBody.actionSummary.deletedNodes, ["after-snapshot"]);
+    assert.deepEqual(persisted.nodes, loadBody.graph.nodes);
+    assert.equal(sourceAfter, originalSource);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/snapshots/:snapshotId/duplicate copies snapshot graph with new metadata", async () => {
+  const server = await startTestServer();
+  try {
+    const createResponse = await postJson(`${server.baseUrl}/api/snapshots`, { name: "Original snapshot" });
+    const { snapshot: originalSnapshot } = await createResponse.json();
+
+    const duplicateResponse = await postJson(`${server.baseUrl}/api/snapshots/${originalSnapshot.snapshotId}/duplicate`, {
+      name: "Duplicate snapshot",
+      notes: "Branching from the original snapshot."
+    });
+    const duplicateBody = await duplicateResponse.json();
+
+    assert.equal(duplicateResponse.status, 201);
+    assert.notEqual(duplicateBody.snapshot.snapshotId, originalSnapshot.snapshotId);
+    assert.equal(duplicateBody.snapshot.name, "Duplicate snapshot");
+    assert.equal(duplicateBody.snapshot.notes, "Branching from the original snapshot.");
+
+    const duplicateGraphResponse = await fetch(`${server.baseUrl}/api/snapshots/${duplicateBody.snapshot.snapshotId}`);
+    const duplicateGraphBody = await duplicateGraphResponse.json();
+    assert.equal(duplicateGraphBody.graph.graphId, duplicateBody.snapshot.snapshotId);
+    assert.equal(duplicateGraphBody.graph.name, "Duplicate snapshot");
+    assert.equal(duplicateGraphBody.graph.nodes.length, originalSnapshot.nodeCount);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/working/revert-to-source copies source into working without mutating source", async () => {
+  const server = await startTestServer();
+  try {
+    const originalSource = await readFile(server.paths.sourceGraph, "utf8");
+    const originalWorking = await readWorkingGraph(server.paths.workingGraph);
+    const editedWorking: GraphState = {
+      ...originalWorking,
+      nodes: [...originalWorking.nodes, { id: "temporary-node", label: "Temporary", type: "concept", origin: "human" }]
+    };
+    await fetch(`${server.baseUrl}/api/working/graph`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ graph: editedWorking })
+    });
+
+    const response = await postJson(`${server.baseUrl}/api/working/revert-to-source`, {});
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+    const sourceAfter = await readFile(server.paths.sourceGraph, "utf8");
+
+    assert.equal(response.status, 200);
+    assert.equal(body.graph.stateType, "working");
+    assert.ok(!body.graph.nodes.some((node: { id: string }) => node.id === "temporary-node"));
+    assert.equal(body.actionSummary.title, "Reverted working graph to source");
+    assert.deepEqual(body.actionSummary.deletedNodes, ["temporary-node"]);
+    assert.deepEqual(persisted, body.graph);
+    assert.equal(sourceAfter, originalSource);
+  } finally {
+    await server.close();
+  }
+});
+
+test("snapshot mutation routes reject invalid request bodies with ApiError", async () => {
+  const server = await startTestServer();
+  try {
+    const invalidCreateResponse = await postJson(`${server.baseUrl}/api/snapshots`, { name: "" });
+    const invalidCreateBody = await invalidCreateResponse.json();
+    assert.equal(invalidCreateResponse.status, 400);
+    assert.equal(invalidCreateBody.error.code, "invalid_request");
+
+    const createResponse = await postJson(`${server.baseUrl}/api/snapshots`, { name: "Valid source snapshot" });
+    const { snapshot } = await createResponse.json();
+    const invalidDuplicateResponse = await postJson(`${server.baseUrl}/api/snapshots/${snapshot.snapshotId}/duplicate`, { name: "" });
+    const invalidDuplicateBody = await invalidDuplicateResponse.json();
+    assert.equal(invalidDuplicateResponse.status, 400);
+    assert.equal(invalidDuplicateBody.error.code, "invalid_request");
+  } finally {
+    await server.close();
+  }
+});
+
+test("snapshot routes return 404 for missing snapshots and 422 for invalid snapshot graphs without mutating working graph", async () => {
+  const server = await startTestServer();
+  try {
+    const missingResponse = await fetch(`${server.baseUrl}/api/snapshots/missing-snapshot`);
+    const missingBody = await missingResponse.json();
+    assert.equal(missingResponse.status, 404);
+    assert.equal(missingBody.error.code, "snapshot_not_found");
+
+    const createResponse = await postJson(`${server.baseUrl}/api/snapshots`, { name: "Will become invalid" });
+    const { snapshot } = await createResponse.json();
+    const workingBeforeInvalidLoad = await readWorkingGraph(server.paths.workingGraph);
+    await writeFile(
+      resolve(server.paths.snapshotsDir, `${snapshot.snapshotId}.json`),
+      JSON.stringify({ ...workingBeforeInvalidLoad, stateType: "snapshot", graphId: snapshot.snapshotId, nodes: [workingBeforeInvalidLoad.nodes[0], workingBeforeInvalidLoad.nodes[0]] }),
+      "utf8"
+    );
+
+    const invalidLoadResponse = await postJson(`${server.baseUrl}/api/snapshots/${snapshot.snapshotId}/load`, {});
+    const invalidLoadBody = await invalidLoadResponse.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(invalidLoadResponse.status, 422);
+    assert.equal(invalidLoadBody.error.code, "invalid_snapshot_graph");
+    assert.deepEqual(persisted, workingBeforeInvalidLoad);
   } finally {
     await server.close();
   }

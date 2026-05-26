@@ -13,6 +13,7 @@ export type BackendPaths = {
   sourceGraph: string;
   workingGraph: string;
   snapshotsMeta: string;
+  snapshotsDir: string;
   fixtureGraphPath: string;
 };
 
@@ -37,7 +38,8 @@ export function resolveBackendPaths(options: {
     fixtureGraphPath,
     sourceGraph: resolve(dataDir, "source_graph.json"),
     workingGraph: resolve(dataDir, "working_graph.json"),
-    snapshotsMeta: resolve(dataDir, "snapshots.json")
+    snapshotsMeta: resolve(dataDir, "snapshots.json"),
+    snapshotsDir: resolve(dataDir, "snapshots")
   };
 }
 
@@ -64,6 +66,7 @@ export function asWorkingCopy(graph: GraphState): GraphState {
 
 export async function initializePersistence(paths: BackendPaths): Promise<void> {
   await mkdir(paths.dataDir, { recursive: true });
+  await mkdir(paths.snapshotsDir, { recursive: true });
 
   if (!existsSync(paths.sourceGraph)) {
     await copyFile(paths.fixtureGraphPath, paths.sourceGraph);
@@ -98,6 +101,25 @@ export async function saveWorkingGraph(paths: BackendPaths, graph: GraphState): 
 
 export async function loadSnapshotsMeta(paths: BackendPaths): Promise<SnapshotMeta[]> {
   return parseSnapshotMeta(await readJson(paths.snapshotsMeta));
+}
+
+export async function saveSnapshotsMeta(paths: BackendPaths, snapshots: SnapshotMeta[]): Promise<void> {
+  await writeJsonAtomic(paths.snapshotsMeta, parseSnapshotMeta(snapshots));
+}
+
+export function snapshotGraphPath(paths: BackendPaths, snapshotId: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(snapshotId)) {
+    throw new Error(`Invalid snapshot id '${snapshotId}'.`);
+  }
+  return resolve(paths.snapshotsDir, `${snapshotId}.json`);
+}
+
+export async function readSnapshotGraph(paths: BackendPaths, snapshotId: string): Promise<unknown> {
+  return readJson(snapshotGraphPath(paths, snapshotId));
+}
+
+export async function saveSnapshotGraph(paths: BackendPaths, snapshotId: string, graph: GraphState): Promise<void> {
+  await writeJsonAtomic(snapshotGraphPath(paths, snapshotId), parseGraphState(graph));
 }
 
 function parseSnapshotMeta(input: unknown): SnapshotMeta[] {

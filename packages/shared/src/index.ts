@@ -204,6 +204,41 @@ export const listSnapshotsResponseSchema = z.object({
   snapshots: z.array(snapshotMetaSchema)
 });
 
+export const createSnapshotRequestSchema = z.object({
+  name: z.string().min(1),
+  notes: z.string().optional(),
+  layout: z.record(z.string(), layoutPositionSchema).optional()
+});
+
+export const createSnapshotResponseSchema = z.object({
+  snapshot: snapshotMetaSchema
+});
+
+export const getSnapshotResponseSchema = z.object({
+  snapshot: snapshotMetaSchema,
+  graph: graphStateSchema
+});
+
+export const loadSnapshotResponseSchema = z.object({
+  graph: graphStateSchema,
+  snapshot: snapshotMetaSchema,
+  actionSummary: actionSummarySchema
+});
+
+export const duplicateSnapshotRequestSchema = z.object({
+  name: z.string().min(1),
+  notes: z.string().optional()
+});
+
+export const duplicateSnapshotResponseSchema = z.object({
+  snapshot: snapshotMetaSchema
+});
+
+export const revertToSourceResponseSchema = z.object({
+  graph: graphStateSchema,
+  actionSummary: actionSummarySchema
+});
+
 export type GraphNode = z.infer<typeof graphNodeSchema>;
 export type GraphEdge = z.infer<typeof graphEdgeSchema>;
 export type GraphState = z.infer<typeof graphStateSchema>;
@@ -222,6 +257,13 @@ export type ValidatePatchResponse = z.infer<typeof validatePatchResponseSchema>;
 export type ApplyPatchRequest = z.infer<typeof applyPatchRequestSchema>;
 export type ApplyPatchResponse = z.infer<typeof applyPatchResponseSchema>;
 export type ListSnapshotsResponse = z.infer<typeof listSnapshotsResponseSchema>;
+export type CreateSnapshotRequest = z.infer<typeof createSnapshotRequestSchema>;
+export type CreateSnapshotResponse = z.infer<typeof createSnapshotResponseSchema>;
+export type GetSnapshotResponse = z.infer<typeof getSnapshotResponseSchema>;
+export type LoadSnapshotResponse = z.infer<typeof loadSnapshotResponseSchema>;
+export type DuplicateSnapshotRequest = z.infer<typeof duplicateSnapshotRequestSchema>;
+export type DuplicateSnapshotResponse = z.infer<typeof duplicateSnapshotResponseSchema>;
+export type RevertToSourceResponse = z.infer<typeof revertToSourceResponseSchema>;
 
 export function graphMetaFromState(graph: GraphState, readOnly = graph.stateType === "source"): GraphMeta {
   return {
