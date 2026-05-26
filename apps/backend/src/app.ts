@@ -1,11 +1,15 @@
 import cors from "cors";
 import express, { type ErrorRequestHandler, type NextFunction, type Request, type Response } from "express";
 import {
+  applyGraphPatch,
+  applyPatchRequestSchema,
   graphMetaFromState,
   hasBlockers,
   parseGraphState,
   replaceWorkingGraphRequestSchema,
+  validateGraphPatch,
   validateGraphState,
+  validatePatchRequestSchema,
   type ValidationResult
 } from "@know-grow/shared";
 import {
@@ -114,6 +118,54 @@ export function createApp(options: CreateAppOptions): express.Express {
       });
       await saveWorkingGraph(options.paths, graph);
       res.json({ graph, validationResults });
+    })
+  );
+
+  app.post(
+    "/api/patch/validate",
+    asyncRoute(async (req, res) => {
+      const parsedRequest = validatePatchRequestSchema.safeParse(req.body);
+      if (!parsedRequest.success) {
+        throw badRequestFromZod(parsedRequest.error.issues);
+      }
+
+      const workingGraph = await loadWorkingGraph(options.paths);
+      res.json(validateGraphPatch(workingGraph, parsedRequest.data.patch));
+    })
+  );
+
+  app.post(
+    "/api/patch/apply",
+    asyncRoute(async (req, res) => {
+      const parsedRequest = applyPatchRequestSchema.safeParse(req.body);
+      if (!parsedRequest.success) {
+        throw badRequestFromZod(parsedRequest.error.issues);
+      }
+
+      const workingGraph = await loadWorkingGraph(options.paths);
+      const patchResult = applyGraphPatch(workingGraph, parsedRequest.data.patch);
+      if (hasBlockers(patchResult.validationResults)) {
+        throw new HttpError(
+          422,
+          "patch_validation_failed",
+          "Patch validation failed; current working graph was not changed.",
+          validationDetails(patchResult.validationResults)
+        );
+      }
+
+      const graph = parseGraphState({
+        ...patchResult.graph,
+        stateType: "working",
+        updatedAt: new Date().toISOString()
+      });
+      await saveWorkingGraph(options.paths, graph);
+      res.json({
+        graph,
+        appliedPatch: patchResult.patch,
+        validationResults: patchResult.validationResults,
+        actionSummary: patchResult.actionSummary,
+        changedElementIds: patchResult.changedElementIds
+      });
     })
   );
 

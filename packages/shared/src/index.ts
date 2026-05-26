@@ -180,6 +180,26 @@ export const replaceWorkingGraphResponseSchema = z.object({
   validationResults: z.array(validationResultSchema)
 });
 
+export const validatePatchRequestSchema = z.object({
+  patch: z.unknown()
+});
+
+export const validatePatchResponseSchema = z.object({
+  valid: z.boolean(),
+  validationResults: z.array(validationResultSchema),
+  actionSummary: actionSummarySchema
+});
+
+export const applyPatchRequestSchema = validatePatchRequestSchema;
+
+export const applyPatchResponseSchema = z.object({
+  graph: graphStateSchema,
+  appliedPatch: graphPatchSchema,
+  validationResults: z.array(validationResultSchema),
+  actionSummary: actionSummarySchema,
+  changedElementIds: z.array(z.string())
+});
+
 export const listSnapshotsResponseSchema = z.object({
   snapshots: z.array(snapshotMetaSchema)
 });
@@ -197,6 +217,10 @@ export type ApiError = z.infer<typeof apiErrorSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type ReplaceWorkingGraphRequest = z.infer<typeof replaceWorkingGraphRequestSchema>;
 export type ReplaceWorkingGraphResponse = z.infer<typeof replaceWorkingGraphResponseSchema>;
+export type ValidatePatchRequest = z.infer<typeof validatePatchRequestSchema>;
+export type ValidatePatchResponse = z.infer<typeof validatePatchResponseSchema>;
+export type ApplyPatchRequest = z.infer<typeof applyPatchRequestSchema>;
+export type ApplyPatchResponse = z.infer<typeof applyPatchResponseSchema>;
 export type ListSnapshotsResponse = z.infer<typeof listSnapshotsResponseSchema>;
 
 export function graphMetaFromState(graph: GraphState, readOnly = graph.stateType === "source"): GraphMeta {
@@ -287,4 +311,531 @@ export function parseGraphState(input: unknown): GraphState {
 
 export function hasBlockers(results: ValidationResult[]): boolean {
   return results.some((result) => result.level === "blocker");
+}
+
+type PatchEvaluation = {
+  patch?: GraphPatch;
+  validationResults: ValidationResult[];
+  actionSummary: ActionSummary;
+  graph: GraphState;
+  changedElementIds: string[];
+};
+
+const MANY_NODE_DELETE_THRESHOLD = 5;
+const MANY_SOURCE_EDGE_DELETE_THRESHOLD = 5;
+
+export function createEmptyActionSummary(instruction = "", title = "No graph changes"): ActionSummary {
+  return {
+    title,
+    instruction,
+    addedNodes: [],
+    updatedNodes: [],
+    deletedNodes: [],
+    addedEdges: [],
+    updatedEdges: [],
+    deletedEdges: [],
+    mergedNodes: [],
+    splitNodes: [],
+    warnings: []
+  };
+}
+
+export function validateGraphPatch(baseGraphInput: unknown, patchInput: unknown): ValidatePatchResponse {
+  const evaluation = evaluateGraphPatch(baseGraphInput, patchInput);
+  return {
+    valid: !hasBlockers(evaluation.validationResults),
+    validationResults: evaluation.validationResults,
+    actionSummary: evaluation.actionSummary
+  };
+}
+
+export function applyGraphPatch(baseGraphInput: unknown, patchInput: unknown): PatchEvaluation {
+  return evaluateGraphPatch(baseGraphInput, patchInput);
+}
+
+function evaluateGraphPatch(baseGraphInput: unknown, patchInput: unknown): PatchEvaluation {
+  const baseGraphResults = validateGraphState(baseGraphInput);
+  const fallbackGraph = graphStateSchema.safeParse(baseGraphInput).success
+    ? graphStateSchema.parse(baseGraphInput)
+    : emptyFallbackGraph();
+  const patchParse = graphPatchSchema.safeParse(patchInput);
+  const actionSummary = createEmptyActionSummary(
+    typeof patchInput === "object" && patchInput !== null && "instruction" in patchInput
+      ? String((patchInput as { instruction?: unknown }).instruction ?? "")
+      : "",
+    typeof patchInput === "object" && patchInput !== null && "summary" in patchInput
+      ? String((patchInput as { summary?: unknown }).summary ?? "Patch validation failed")
+      : "Patch validation failed"
+  );
+
+  if (baseGraphResults.some((result) => result.level === "blocker")) {
+    return {
+      validationResults: baseGraphResults,
+      actionSummary,
+      graph: fallbackGraph,
+      changedElementIds: []
+    };
+  }
+
+  const baseGraph = parseGraphState(baseGraphInput);
+  if (baseGraph.stateType === "source") {
+    return {
+      validationResults: [
+        {
+          level: "blocker",
+          code: "source_graph_mutation",
+          message: "Patches may only mutate the working graph, not the immutable source graph."
+        }
+      ],
+      actionSummary,
+      graph: baseGraph,
+      changedElementIds: []
+    };
+  }
+
+  if (!patchParse.success) {
+    const validationResults = patchParse.error.issues.map((issue) => ({
+      level: "blocker" as const,
+      code: issue.path.includes("op") ? "unknown_operation" : "malformed_patch",
+      message: `${issue.path.join(".") || "patch"}: ${issue.message}`
+    }));
+    return { validationResults, actionSummary, graph: baseGraph, changedElementIds: [] };
+  }
+
+  const patch = patchParse.data;
+  const workingGraph: GraphState = cloneGraph(baseGraph);
+  const results: ValidationResult[] = [];
+  const summary = createEmptyActionSummary(patch.instruction, patch.summary || "Graph patch");
+  const changedElementIds = new Set<string>();
+  const deletedSourceEdgeIds = new Set<string>();
+  const implicitlyDeletedEdgeIds = new Set<string>();
+
+  const addWarning = (code: string, message: string, operationIndex?: number, elementIds?: string[]) => {
+    results.push({ level: "warning", code, message, ...(operationIndex === undefined ? {} : { operationIndex }), ...(elementIds ? { elementIds } : {}) });
+    summary.warnings.push(message);
+  };
+  const addBlocker = (code: string, message: string, operationIndex?: number, elementIds?: string[]) => {
+    results.push({ level: "blocker", code, message, ...(operationIndex === undefined ? {} : { operationIndex }), ...(elementIds ? { elementIds } : {}) });
+  };
+
+  const noteMissingRationale = (operation: GraphPatchOperation, operationIndex: number) => {
+    const hasNotes = "notes" in operation && typeof operation.notes === "string" && operation.notes.trim().length > 0;
+    if (!hasNotes) {
+      addWarning("operation_missing_notes", `Operation ${operationIndex + 1} has no notes or rationale.`, operationIndex);
+    }
+  };
+
+  for (const [operationIndex, operation] of patch.operations.entries()) {
+    const blockersBefore = results.filter((result) => result.level === "blocker").length;
+    noteMissingRationale(operation, operationIndex);
+
+    if (isNoOpAfterPriorOperation(workingGraph, operation, implicitlyDeletedEdgeIds)) {
+      continue;
+    }
+
+    switch (operation.op) {
+      case "add_node": {
+        if (findNode(workingGraph, operation.id)) {
+          addBlocker("duplicate_node_id", `Node '${operation.id}' already exists.`, operationIndex, [operation.id]);
+          break;
+        }
+        if (operation.origin === "llm" && (!operation.sourceNodeIds || operation.sourceNodeIds.length === 0)) {
+          addWarning("llm_node_missing_source_refs", `LLM-created node '${operation.id}' has no source refs.`, operationIndex, [operation.id]);
+        }
+        workingGraph.nodes.push({
+          id: operation.id,
+          label: operation.label,
+          type: operation.nodeType,
+          origin: operation.origin,
+          ...(operation.notes === undefined ? {} : { notes: operation.notes }),
+          ...(operation.sourceNodeIds === undefined ? {} : { sourceNodeIds: [...operation.sourceNodeIds] }),
+          ...(operation.properties === undefined ? {} : { properties: { ...operation.properties } })
+        });
+        summary.addedNodes.push(operation.id);
+        changedElementIds.add(operation.id);
+        break;
+      }
+      case "update_node": {
+        const node = findNode(workingGraph, operation.id);
+        if (!node) {
+          addBlocker("missing_node", `Cannot update missing node '${operation.id}'.`, operationIndex, [operation.id]);
+          break;
+        }
+        Object.assign(node, cloneUnknown(operation.changes));
+        summary.updatedNodes.push(operation.id);
+        changedElementIds.add(operation.id);
+        break;
+      }
+      case "delete_node": {
+        const node = findNode(workingGraph, operation.id);
+        if (!node) {
+          addBlocker("missing_node", `Cannot delete missing node '${operation.id}'.`, operationIndex, [operation.id]);
+          break;
+        }
+        const incidentEdges = workingGraph.edges.filter((edge) => edge.source === operation.id || edge.target === operation.id);
+        if (incidentEdges.length > 0 && !operation.deleteIncidentEdges) {
+          addBlocker(
+            "delete_node_would_leave_dangling_edges",
+            `Cannot delete node '${operation.id}' without deleting incident edges: ${incidentEdges.map((edge) => edge.id).join(", ")}.`,
+            operationIndex,
+            [operation.id, ...incidentEdges.map((edge) => edge.id)]
+          );
+          break;
+        }
+        if (node.origin === "source") {
+          addWarning("delete_source_origin_node", `Patch deletes source-origin working node '${operation.id}'.`, operationIndex, [operation.id]);
+        }
+        const incidentEdgeIds = new Set(incidentEdges.map((edge) => edge.id));
+        const explicitIncidentDeletes = patch.operations
+          .slice(operationIndex + 1)
+          .filter((futureOperation): futureOperation is Extract<GraphPatchOperation, { op: "delete_edge" }> => futureOperation.op === "delete_edge" && incidentEdgeIds.has(futureOperation.id))
+          .map((futureOperation) => futureOperation.id);
+        for (const edgeId of explicitIncidentDeletes) {
+          addWarning("delete_edge_already_removed", `Edge '${edgeId}' is already removed by deleting node '${operation.id}'.`, operationIndex, [edgeId]);
+        }
+        deleteNodeById(workingGraph, operation.id);
+        summary.deletedNodes.push(operation.id);
+        changedElementIds.add(operation.id);
+        for (const edge of incidentEdges) {
+          if (edge.origin === "source") {
+            deletedSourceEdgeIds.add(edge.id);
+          }
+          implicitlyDeletedEdgeIds.add(edge.id);
+          deleteEdgeById(workingGraph, edge.id);
+          summary.deletedEdges.push(edge.id);
+          changedElementIds.add(edge.id);
+        }
+        break;
+      }
+      case "add_edge": {
+        if (findEdge(workingGraph, operation.id)) {
+          addBlocker("duplicate_edge_id", `Edge '${operation.id}' already exists.`, operationIndex, [operation.id]);
+          break;
+        }
+        const missingEndpoints = [operation.source, operation.target].filter((id) => !findNode(workingGraph, id));
+        if (missingEndpoints.length > 0) {
+          addBlocker(
+            "edge_references_missing_node",
+            `Edge '${operation.id}' references missing node(s): ${missingEndpoints.join(", ")}.`,
+            operationIndex,
+            [operation.id, ...missingEndpoints]
+          );
+          break;
+        }
+        workingGraph.edges.push({
+          id: operation.id,
+          source: operation.source,
+          target: operation.target,
+          label: operation.label,
+          origin: operation.origin,
+          ...(operation.notes === undefined ? {} : { notes: operation.notes }),
+          ...(operation.sourceEdgeIds === undefined ? {} : { sourceEdgeIds: [...operation.sourceEdgeIds] }),
+          ...(operation.properties === undefined ? {} : { properties: { ...operation.properties } })
+        });
+        summary.addedEdges.push(operation.id);
+        changedElementIds.add(operation.id);
+        break;
+      }
+      case "update_edge": {
+        const edge = findEdge(workingGraph, operation.id);
+        if (!edge) {
+          addBlocker("missing_edge", `Cannot update missing edge '${operation.id}'.`, operationIndex, [operation.id]);
+          break;
+        }
+        Object.assign(edge, cloneUnknown(operation.changes));
+        summary.updatedEdges.push(operation.id);
+        changedElementIds.add(operation.id);
+        break;
+      }
+      case "delete_edge": {
+        const edge = findEdge(workingGraph, operation.id);
+        if (!edge) {
+          addBlocker("missing_edge", `Cannot delete missing edge '${operation.id}'.`, operationIndex, [operation.id]);
+          break;
+        }
+        if (edge.origin === "source") {
+          deletedSourceEdgeIds.add(edge.id);
+          addWarning("delete_source_origin_edge", `Patch deletes source-origin working edge '${operation.id}'.`, operationIndex, [operation.id]);
+        }
+        deleteEdgeById(workingGraph, operation.id);
+        summary.deletedEdges.push(operation.id);
+        changedElementIds.add(operation.id);
+        break;
+      }
+      case "merge_nodes": {
+        applyMergeNodes(workingGraph, operation, operationIndex, addBlocker, addWarning, summary, changedElementIds, deletedSourceEdgeIds, implicitlyDeletedEdgeIds);
+        break;
+      }
+      case "split_node": {
+        applySplitNode(workingGraph, operation, operationIndex, addBlocker, addWarning, summary, changedElementIds, deletedSourceEdgeIds, implicitlyDeletedEdgeIds);
+        break;
+      }
+    }
+
+    if (results.filter((result) => result.level === "blocker").length > blockersBefore) {
+      continue;
+    }
+  }
+
+  if (summary.deletedNodes.length > MANY_NODE_DELETE_THRESHOLD) {
+    addWarning("many_nodes_deleted", `Patch deletes ${summary.deletedNodes.length} nodes.`);
+  }
+  if (deletedSourceEdgeIds.size > MANY_SOURCE_EDGE_DELETE_THRESHOLD) {
+    addWarning("many_source_edges_removed", `Patch removes ${deletedSourceEdgeIds.size} source-derived edges.`);
+  }
+
+  const finalValidationResults = validateGraphState(workingGraph).map((result) => ({ ...result, code: postApplyCode(result.code) }));
+  results.push(...finalValidationResults);
+
+  if (!hasBlockers(results) && hasDisconnectedComponents(workingGraph)) {
+    addWarning("disconnected_components", "Patch creates disconnected graph components.");
+  }
+
+  return {
+    patch,
+    validationResults: results,
+    actionSummary: summary,
+    graph: hasBlockers(results) ? baseGraph : workingGraph,
+    changedElementIds: hasBlockers(results) ? [] : [...changedElementIds]
+  };
+}
+
+function applyMergeNodes(
+  graph: GraphState,
+  operation: Extract<GraphPatchOperation, { op: "merge_nodes" }>,
+  operationIndex: number,
+  addBlocker: (code: string, message: string, operationIndex?: number, elementIds?: string[]) => void,
+  addWarning: (code: string, message: string, operationIndex?: number, elementIds?: string[]) => void,
+  summary: ActionSummary,
+  changedElementIds: Set<string>,
+  deletedSourceEdgeIds: Set<string>,
+  implicitlyDeletedEdgeIds: Set<string>
+): void {
+  const inputIds = new Set(operation.inputNodeIds);
+  if (inputIds.size !== operation.inputNodeIds.length) {
+    addBlocker("duplicate_input_node_id", "Merge input node ids must be unique.", operationIndex, operation.inputNodeIds);
+    return;
+  }
+  const missingInputIds = operation.inputNodeIds.filter((id) => !findNode(graph, id));
+  if (missingInputIds.length > 0) {
+    addBlocker("missing_node", `Cannot merge missing node(s): ${missingInputIds.join(", ")}.`, operationIndex, missingInputIds);
+    return;
+  }
+  const outputConflict = findNode(graph, operation.outputNode.id);
+  if (outputConflict && (!operation.deleteInputNodes || !inputIds.has(operation.outputNode.id))) {
+    addBlocker("duplicate_node_id", `Merge output node '${operation.outputNode.id}' conflicts with an existing node.`, operationIndex, [operation.outputNode.id]);
+    return;
+  }
+  if (operation.outputNode.origin === "llm" && (!operation.outputNode.sourceNodeIds || operation.outputNode.sourceNodeIds.length === 0)) {
+    addWarning("llm_node_missing_source_refs", `LLM-created merge output node '${operation.outputNode.id}' has no source refs.`, operationIndex, [operation.outputNode.id]);
+  }
+
+  if (operation.deleteInputNodes) {
+    const incidentEdges = graph.edges.filter((edge) => inputIds.has(edge.source) || inputIds.has(edge.target));
+    for (const edge of incidentEdges) {
+      if (edge.origin === "source") {
+        deletedSourceEdgeIds.add(edge.id);
+      }
+      implicitlyDeletedEdgeIds.add(edge.id);
+      deleteEdgeById(graph, edge.id);
+      summary.deletedEdges.push(edge.id);
+      changedElementIds.add(edge.id);
+    }
+    for (const nodeId of operation.inputNodeIds) {
+      const node = findNode(graph, nodeId);
+      if (node?.origin === "source") {
+        addWarning("delete_source_origin_node", `Patch deletes source-origin working node '${nodeId}'.`, operationIndex, [nodeId]);
+      }
+      deleteNodeById(graph, nodeId);
+      summary.deletedNodes.push(nodeId);
+      changedElementIds.add(nodeId);
+    }
+  }
+
+  upsertOutputNode(graph, operation.outputNode);
+  summary.addedNodes.push(operation.outputNode.id);
+  summary.mergedNodes.push(...operation.inputNodeIds, operation.outputNode.id);
+  changedElementIds.add(operation.outputNode.id);
+  appendReplacementEdges(graph, operation.replacementEdges ?? [], operationIndex, addBlocker, summary, changedElementIds);
+}
+
+function applySplitNode(
+  graph: GraphState,
+  operation: Extract<GraphPatchOperation, { op: "split_node" }>,
+  operationIndex: number,
+  addBlocker: (code: string, message: string, operationIndex?: number, elementIds?: string[]) => void,
+  addWarning: (code: string, message: string, operationIndex?: number, elementIds?: string[]) => void,
+  summary: ActionSummary,
+  changedElementIds: Set<string>,
+  deletedSourceEdgeIds: Set<string>,
+  implicitlyDeletedEdgeIds: Set<string>
+): void {
+  const inputNode = findNode(graph, operation.inputNodeId);
+  if (!inputNode) {
+    addBlocker("missing_node", `Cannot split missing node '${operation.inputNodeId}'.`, operationIndex, [operation.inputNodeId]);
+    return;
+  }
+  const outputIds = new Set(operation.outputNodes.map((node) => node.id));
+  if (outputIds.size !== operation.outputNodes.length) {
+    addBlocker("duplicate_node_id", "Split output node ids must be unique.", operationIndex, operation.outputNodes.map((node) => node.id));
+    return;
+  }
+  const conflictingOutputIds = operation.outputNodes
+    .map((node) => node.id)
+    .filter((id) => findNode(graph, id) && (!operation.deleteInputNode || id !== operation.inputNodeId));
+  if (conflictingOutputIds.length > 0) {
+    addBlocker("duplicate_node_id", `Split output node id(s) already exist: ${conflictingOutputIds.join(", ")}.`, operationIndex, conflictingOutputIds);
+    return;
+  }
+  for (const node of operation.outputNodes) {
+    if (node.origin === "llm" && (!node.sourceNodeIds || node.sourceNodeIds.length === 0)) {
+      addWarning("llm_node_missing_source_refs", `LLM-created split output node '${node.id}' has no source refs.`, operationIndex, [node.id]);
+    }
+  }
+
+  if (operation.deleteInputNode) {
+    const incidentEdges = graph.edges.filter((edge) => edge.source === operation.inputNodeId || edge.target === operation.inputNodeId);
+    for (const edge of incidentEdges) {
+      if (edge.origin === "source") {
+        deletedSourceEdgeIds.add(edge.id);
+      }
+      implicitlyDeletedEdgeIds.add(edge.id);
+      deleteEdgeById(graph, edge.id);
+      summary.deletedEdges.push(edge.id);
+      changedElementIds.add(edge.id);
+    }
+    if (inputNode.origin === "source") {
+      addWarning("delete_source_origin_node", `Patch deletes source-origin working node '${operation.inputNodeId}'.`, operationIndex, [operation.inputNodeId]);
+    }
+    deleteNodeById(graph, operation.inputNodeId);
+    summary.deletedNodes.push(operation.inputNodeId);
+    changedElementIds.add(operation.inputNodeId);
+  }
+
+  for (const outputNode of operation.outputNodes) {
+    upsertOutputNode(graph, outputNode);
+    summary.addedNodes.push(outputNode.id);
+    summary.splitNodes.push(outputNode.id);
+    changedElementIds.add(outputNode.id);
+  }
+  summary.splitNodes.unshift(operation.inputNodeId);
+  appendReplacementEdges(graph, operation.replacementEdges ?? [], operationIndex, addBlocker, summary, changedElementIds);
+}
+
+function isNoOpAfterPriorOperation(graph: GraphState, operation: GraphPatchOperation, implicitlyDeletedEdgeIds: Set<string>): boolean {
+  if (operation.op === "delete_edge") {
+    return !findEdge(graph, operation.id) && implicitlyDeletedEdgeIds.has(operation.id);
+  }
+  return false;
+}
+
+function appendReplacementEdges(
+  graph: GraphState,
+  replacementEdges: GraphEdge[],
+  operationIndex: number,
+  addBlocker: (code: string, message: string, operationIndex?: number, elementIds?: string[]) => void,
+  summary: ActionSummary,
+  changedElementIds: Set<string>
+): void {
+  for (const edge of replacementEdges) {
+    if (findEdge(graph, edge.id)) {
+      addBlocker("duplicate_edge_id", `Replacement edge '${edge.id}' conflicts with an existing edge.`, operationIndex, [edge.id]);
+      continue;
+    }
+    const missingEndpoints = [edge.source, edge.target].filter((id) => !findNode(graph, id));
+    if (missingEndpoints.length > 0) {
+      addBlocker("edge_references_missing_node", `Replacement edge '${edge.id}' references missing node(s): ${missingEndpoints.join(", ")}.`, operationIndex, [edge.id, ...missingEndpoints]);
+      continue;
+    }
+    graph.edges.push(cloneUnknown(edge));
+    summary.addedEdges.push(edge.id);
+    changedElementIds.add(edge.id);
+  }
+}
+
+function upsertOutputNode(graph: GraphState, node: GraphNode): void {
+  const existingIndex = graph.nodes.findIndex((existingNode) => existingNode.id === node.id);
+  const clonedNode = cloneUnknown(node);
+  if (existingIndex >= 0) {
+    graph.nodes[existingIndex] = clonedNode;
+  } else {
+    graph.nodes.push(clonedNode);
+  }
+}
+
+function cloneGraph(graph: GraphState): GraphState {
+  return cloneUnknown(graph);
+}
+
+function cloneUnknown<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function findNode(graph: GraphState, id: string): GraphNode | undefined {
+  return graph.nodes.find((node) => node.id === id);
+}
+
+function findEdge(graph: GraphState, id: string): GraphEdge | undefined {
+  return graph.edges.find((edge) => edge.id === id);
+}
+
+function deleteNodeById(graph: GraphState, id: string): void {
+  graph.nodes = graph.nodes.filter((node) => node.id !== id);
+  if (graph.layout) {
+    delete graph.layout[id];
+  }
+}
+
+function deleteEdgeById(graph: GraphState, id: string): void {
+  graph.edges = graph.edges.filter((edge) => edge.id !== id);
+}
+
+function hasDisconnectedComponents(graph: GraphState): boolean {
+  if (graph.nodes.length <= 1) {
+    return false;
+  }
+  const adjacency = new Map<string, Set<string>>();
+  for (const node of graph.nodes) {
+    adjacency.set(node.id, new Set());
+  }
+  for (const edge of graph.edges) {
+    adjacency.get(edge.source)?.add(edge.target);
+    adjacency.get(edge.target)?.add(edge.source);
+  }
+  const [firstNode] = graph.nodes;
+  if (!firstNode) {
+    return false;
+  }
+  const visited = new Set<string>();
+  const stack = [firstNode.id];
+  while (stack.length > 0) {
+    const nodeId = stack.pop()!;
+    if (visited.has(nodeId)) {
+      continue;
+    }
+    visited.add(nodeId);
+    for (const next of adjacency.get(nodeId) ?? []) {
+      if (!visited.has(next)) {
+        stack.push(next);
+      }
+    }
+  }
+  return visited.size !== graph.nodes.length;
+}
+
+function postApplyCode(code: string): string {
+  if (code === "duplicate_node_id" || code === "duplicate_edge_id" || code === "dangling_edge_endpoint") {
+    return `post_apply_${code}`;
+  }
+  return code;
+}
+
+function emptyFallbackGraph(): GraphState {
+  return {
+    graphId: "invalid",
+    name: "Invalid graph",
+    stateType: "working",
+    nodes: [],
+    edges: []
+  };
 }

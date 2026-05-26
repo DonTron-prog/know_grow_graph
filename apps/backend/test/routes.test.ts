@@ -7,7 +7,7 @@ import { type AddressInfo } from "node:net";
 import test from "node:test";
 import { createApp } from "../src/app.ts";
 import { initializePersistence, resolveBackendPaths } from "../src/persistence.ts";
-import { type GraphState } from "@know-grow/shared";
+import { type GraphPatch, type GraphState } from "@know-grow/shared";
 
 async function startTestServer(): Promise<{
   baseUrl: string;
@@ -115,6 +115,135 @@ test("PUT /api/working/graph returns 422 ApiError and does not persist invalid r
 
     assert.equal(response.status, 422);
     assert.equal(body.error.code, "invalid_working_graph");
+    assert.ok(body.error.details.validationResults.some((result: { code: string }) => result.code === "duplicate_node_id"));
+    assert.deepEqual(persisted, original);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/patch/validate returns validation results and does not mutate working graph", async () => {
+  const server = await startTestServer();
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const patch: GraphPatch = {
+      patchId: "patch-invalid-delete",
+      instruction: "Delete Prompting",
+      summary: "Invalid delete without incident edges",
+      operations: [{ op: "delete_node", id: "prompting" }]
+    };
+
+    const response = await fetch(`${server.baseUrl}/api/patch/validate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patch })
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 200);
+    assert.equal(body.valid, false);
+    assert.ok(body.validationResults.some((result: { code: string }) => result.code === "delete_node_would_leave_dangling_edges"));
+    assert.deepEqual(persisted, original);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/patch/apply persists valid patches and returns changed element IDs", async () => {
+  const server = await startTestServer();
+  try {
+    const patch: GraphPatch = {
+      patchId: "patch-add-node-edge",
+      instruction: "Add a human review concept",
+      summary: "Adds review concept connected to prompting",
+      operations: [
+        {
+          op: "add_node",
+          id: "human-review",
+          label: "Human Review",
+          nodeType: "concept",
+          origin: "human",
+          notes: "Added from toolbar or Pi patch."
+        },
+        {
+          op: "add_edge",
+          id: "edge-prompting-human-review",
+          source: "prompting",
+          target: "human-review",
+          label: "benefits_from",
+          origin: "human",
+          notes: "Connects new review concept."
+        }
+      ]
+    };
+
+    const response = await fetch(`${server.baseUrl}/api/patch/apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patch })
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 200);
+    assert.equal(body.appliedPatch.patchId, patch.patchId);
+    assert.deepEqual(body.actionSummary.addedNodes, ["human-review"]);
+    assert.ok(body.changedElementIds.includes("human-review"));
+    assert.ok(persisted.nodes.some((node) => node.id === "human-review"));
+    assert.ok(persisted.edges.some((edge) => edge.id === "edge-prompting-human-review"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/patch/apply persists warning-only patches", async () => {
+  const server = await startTestServer();
+  try {
+    const patch: GraphPatch = {
+      patchId: "patch-warning-only",
+      instruction: "Add unsourced LLM concept",
+      summary: "Warns but applies",
+      operations: [{ op: "add_node", id: "llm-unsourced", label: "LLM Unsourced", nodeType: "concept", origin: "llm" }]
+    };
+
+    const response = await fetch(`${server.baseUrl}/api/patch/apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patch })
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 200);
+    assert.ok(body.validationResults.some((result: { code: string; level: string }) => result.code === "llm_node_missing_source_refs" && result.level === "warning"));
+    assert.ok(persisted.nodes.some((node) => node.id === "llm-unsourced"));
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /api/patch/apply returns 422 and does not persist invalid patches", async () => {
+  const server = await startTestServer();
+  try {
+    const original = await readWorkingGraph(server.paths.workingGraph);
+    const patch: GraphPatch = {
+      patchId: "patch-duplicate",
+      instruction: "Duplicate existing node",
+      summary: "Should fail",
+      operations: [{ op: "add_node", id: "prompting", label: "Duplicate", nodeType: "concept", origin: "human" }]
+    };
+
+    const response = await fetch(`${server.baseUrl}/api/patch/apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patch })
+    });
+    const body = await response.json();
+    const persisted = await readWorkingGraph(server.paths.workingGraph);
+
+    assert.equal(response.status, 422);
+    assert.equal(body.error.code, "patch_validation_failed");
     assert.ok(body.error.details.validationResults.some((result: { code: string }) => result.code === "duplicate_node_id"));
     assert.deepEqual(persisted, original);
   } finally {

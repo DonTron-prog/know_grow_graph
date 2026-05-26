@@ -1,32 +1,31 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the frontend read-only vertical slice. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the shared patch engine and backend patch endpoints landed. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
-- Replaced the frontend scaffold with a Vite/React/TypeScript browser app.
-- Added a frontend API client for the implemented read endpoints: `GET /api/source/meta`, `GET /api/working/graph`, and `GET /api/snapshots`.
-- Implemented the required single-screen shell regions: `TopToolbar`, `InspectorPanel`, `GraphCanvas`, `PiPanel`, and `StatusBar`.
-- Added a read-only SVG graph display with node/edge rendering, click selection, background clear, inspector details, load/error states, active graph status, graph counts, snapshot count, and placeholder disabled mutation controls.
-- Added Pi Panel tabs for Chat, Actions, and Raw in read-only/placeholder form.
-- Added frontend API-client tests for base URL normalization, endpoint fetching, and backend `ApiError` detail preservation.
-- Added a frontend `build` script backed by Vite.
-- Updated the shared package exports/types so TypeScript consumers can import shared types from `@know-grow/shared`.
-- Tightened the root Node engine to satisfy Vite's current runtime requirement.
+- Added shared pure graph patch validation/application for add/update/delete node/edge, merge nodes, and split node operations without mutating inputs.
+- Added patch blockers, warnings, `ActionSummary`, and `changedElementIds` handling, with shared tests for valid/invalid patch behavior and merge/split coverage.
+- Implemented backend `POST /api/patch/validate` and `POST /api/patch/apply` using the shared patch engine.
+- Ensured patch apply persists only accepted mutations and returns `422` without mutating `working_graph.json` when blockers exist.
+- Added backend route tests for patch validate/apply success, validation-only no-mutation behavior, invalid apply no-mutation behavior, and changed IDs.
+- Validation run passed: `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint`.
 
 ## Confirmed current state
 
 - The implementation lives under `apps/*` and `packages/*`; root `src/` and `src/lib/` are placeholders only.
 - `apps/backend/src/app.ts` exposes a modular `createApp(...)`; `apps/backend/src/persistence.ts` owns disk-backed JSON initialization/read/write; `apps/backend/src/index.ts` only starts the server.
-- Backend currently implements `GET /api/health`, `GET /api/source/meta`, `GET /api/source/graph`, `GET /api/working/graph`, `PUT /api/working/graph`, and `GET /api/snapshots`.
-- Implemented backend routes already follow the desired conventions: spec-shaped `{ graph }` replacement requests, `{ graph, validationResults }` replacement responses, `{ snapshots }` list responses, and `{ error: { code, message, details? } }` API errors.
+- Backend currently implements `GET /api/health`, `GET /api/source/meta`, `GET /api/source/graph`, `GET /api/working/graph`, `PUT /api/working/graph`, `GET /api/snapshots`, `POST /api/patch/validate`, and `POST /api/patch/apply`.
+- Implemented backend routes already follow the desired conventions: spec-shaped replacement and patch requests, validation/action-summary responses, `{ snapshots }` list responses, and `{ error: { code, message, details? } }` API errors.
 - Backend graph reads are disk-backed per request, which should be preserved so later Pi direct-file edits can be reloaded instead of hidden behind an in-memory cache.
 - `packages/shared/src/index.ts` defines canonical graph, snapshot, patch-operation, validation-result, action-summary, and some API envelope schemas/types.
 - `validateGraphState` covers malformed graph shape, duplicate node IDs, duplicate edge IDs, dangling edge endpoints, and layout entries for missing nodes.
+- `validateGraphPatch`/`applyGraphPatch` now cover patch blocker/warning generation, immutable application, action summaries, changed IDs, merge/split semantics, and direct source-graph mutation blocking.
 - `fixtures/source_graph.example.json` is a checked-in non-private fixture for first render/startup fallback.
 - Frontend now has a Vite/React/TypeScript read-only vertical slice and API-client behavior tests, but graph interaction is still the simple SVG implementation rather than Cytoscape/equivalent canvas behavior.
 - `packages/shared/src/index.js` is still a stale Phase 1 placeholder runtime file while package exports point at `./src/index.ts`; settle runtime/browser consumption and remove or neutralize this stale file during shared packaging cleanup.
 - `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
+- Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints as well as existing replacement/error routes.
 - Frontend tests now cover API-client behavior; pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
@@ -42,19 +41,6 @@ Plan-only snapshot for the first PoC, refreshed after the frontend read-only ver
   - Remove or neutralize the stale `packages/shared/src/index.js` placeholder as part of packaging cleanup.
   - Validate that backend and frontend import the same shared contracts without runtime ambiguity.
 
-- **P0 - Implement shared graph patch validation/application.**
-  - Add pure helpers in `packages/shared` for validating and applying `add_node`, `update_node`, `delete_node`, `add_edge`, `update_edge`, `delete_edge`, `merge_nodes`, and `split_node` without mutating inputs.
-  - Include blockers for malformed patches, unknown operation types, duplicate IDs, missing references, deleting nodes with incident edges unless allowed, missing update/delete targets, direct source-graph mutation, post-apply duplicate IDs, and post-apply dangling edges.
-  - Include warnings for LLM nodes without source refs, deleting source-origin working elements, many deletions/source-edge removals, disconnected components, and operations without notes/rationale.
-  - Generate `ActionSummary` and `changedElementIds` consistently; cover merge/split semantics, source-ref preservation, replacement-edge conflicts, warning thresholds, and changed-ID conventions with tests.
-
-- **P0 - Add backend patch endpoints.**
-  - Implement `POST /api/patch/validate` and `POST /api/patch/apply` using the shared patch engine.
-  - Return the specified validation results, action summary, applied patch, updated graph, and changed IDs.
-  - Persist only accepted patches; return `422` and leave `working_graph.json` unchanged when blockers exist.
-  - Keep API errors in `{ error: { code, message, details? } }`, with validation blockers under `error.details.validationResults`.
-  - Test valid mutation, invalid no-mutation, and warning-not-blocking behavior.
-
 - **P0 - Implement backend snapshot mutation and source-revert routes.**
   - Add snapshot graph-file persistence under `snapshots/<snapshotId>.json` plus metadata updates in `snapshots.json`.
   - Implement `POST /api/working/revert-to-source`, `POST /api/snapshots`, `GET /api/snapshots/:snapshotId`, `POST /api/snapshots/:snapshotId/load`, and `POST /api/snapshots/:snapshotId/duplicate`.
@@ -68,8 +54,8 @@ Plan-only snapshot for the first PoC, refreshed after the frontend read-only ver
   - Connect save/load/duplicate/revert snapshot UI to backend routes; surface backend errors in StatusBar/Raw without corrupting the current UI graph.
 
 - **P0 - Expand automated validation for implemented P0 behavior.**
-  - Add shared tests for duplicate edge IDs, malformed graph input, layout warnings, patch blockers, warnings, application immutability, action summaries, and changed IDs.
-  - Add backend tests for health/source/working reads, fixture fallback, source immutability, patch endpoints, snapshot/revert endpoints, and no mutation on `422`.
+  - Continue shared validation coverage for malformed graph edge cases, layout warnings, patch warning thresholds, replacement-edge conflicts, and changed-ID/source-ref conventions not yet pinned by tests.
+  - Add backend tests for health/source/working reads, fixture fallback, source immutability, snapshot/revert endpoints, and no mutation on remaining `422` paths.
   - Expand frontend tests beyond the API client as renderer interaction, selection state, editing, undo/redo, and snapshot flows land.
   - Add pi-agent behavior tests once the HTTP bridge exists; avoid misleading green zero-test packages as functionality lands.
   - Keep `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint` as the required validation gates.
@@ -115,7 +101,7 @@ Plan-only snapshot for the first PoC, refreshed after the frontend read-only ver
 
 ## Open decisions / spec clarifications
 
-- Define merge/split edge remapping semantics, replacement-edge conflict handling, source-ref preservation, output node defaults, and changed-element ID conventions before final patch tests.
+- Confirm whether the implemented merge/split edge remapping, replacement-edge conflict handling, source-ref preservation, output node defaults, and changed-element ID conventions are final before broader UI/Pi usage.
 - Choose the first MVP UX for toolbar `Merge Selected` and `Split Selected`: minimal local form/confirmation versus Pi delegation.
 - Confirm generated ID formats and uniqueness scope for user-created nodes, edges, snapshots, and patch IDs.
 - Clarify whether node IDs and edge IDs are separate namespaces or globally unique element IDs for renderer/API purposes.

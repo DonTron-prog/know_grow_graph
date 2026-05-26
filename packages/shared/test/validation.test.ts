@@ -46,3 +46,40 @@ test("dangling edge endpoints fail validation", () => {
   assert.equal(hasBlockers(results), true);
   assert.ok(results.some((result) => result.code === "dangling_edge_endpoint"));
 });
+
+test("duplicate edge IDs fail validation", () => {
+  const graph: GraphState = {
+    graphId: "bad-duplicate-edges",
+    name: "Bad duplicate edge graph",
+    stateType: "working",
+    nodes: [
+      { id: "a", label: "A", type: "concept", origin: "human" },
+      { id: "b", label: "B", type: "concept", origin: "human" }
+    ],
+    edges: [
+      { id: "edge-a-b", source: "a", target: "b", label: "points_to", origin: "human" },
+      { id: "edge-a-b", source: "b", target: "a", label: "points_back", origin: "human" }
+    ]
+  };
+
+  const results = validateGraphState(graph);
+
+  assert.equal(hasBlockers(results), true);
+  assert.ok(results.some((result) => result.code === "duplicate_edge_id"));
+});
+
+test("layout entries for missing nodes are warnings, not blockers", () => {
+  const graph: GraphState = {
+    graphId: "layout-warning",
+    name: "Layout warning graph",
+    stateType: "working",
+    nodes: [{ id: "a", label: "A", type: "concept", origin: "human" }],
+    edges: [],
+    layout: { missing: { x: 1, y: 2 } }
+  };
+
+  const results = validateGraphState(graph);
+
+  assert.equal(hasBlockers(results), false);
+  assert.ok(results.some((result) => result.code === "layout_for_missing_node" && result.level === "warning"));
+});
