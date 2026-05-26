@@ -139,15 +139,27 @@ button:not(:disabled) {
 .graph-canvas-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 1rem;
   padding: 1rem 1.1rem;
   border-bottom: 1px solid #e2e9f2;
 }
 
+.graph-canvas-header p {
+  margin: 0.35rem 0 0;
+  color: #66758a;
+  font-size: 0.88rem;
+}
+
 .graph-canvas-header span {
   color: #66758a;
   white-space: nowrap;
+}
+
+.graph-canvas-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .graph-svg {
@@ -158,6 +170,21 @@ button:not(:disabled) {
     radial-gradient(circle at 18px 18px, rgba(121, 139, 164, 0.22) 1px, transparent 1px),
     linear-gradient(180deg, #ffffff 0%, #f6f9fd 100%);
   background-size: 32px 32px, auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.canvas-hitbox {
+  fill: transparent;
+  cursor: grab;
+}
+
+.graph-svg:active .canvas-hitbox {
+  cursor: grabbing;
+}
+
+.edge {
+  cursor: pointer;
 }
 
 .edge line {
@@ -183,7 +210,11 @@ button:not(:disabled) {
 }
 
 .node {
-  cursor: pointer;
+  cursor: grab;
+}
+
+.node:active {
+  cursor: grabbing;
 }
 
 .node circle {
@@ -219,6 +250,24 @@ button:not(:disabled) {
 .node.origin-imported circle {
   fill: #fff3dc;
   stroke: #d79332;
+}
+
+.node.changed circle,
+.edge.changed line {
+  stroke: #2fbf71;
+  stroke-width: 6;
+}
+
+.node.warning circle,
+.edge.warning line {
+  stroke: #e08a1e;
+  stroke-width: 6;
+}
+
+.node.invalid circle,
+.edge.invalid line {
+  stroke: #cc3344;
+  stroke-width: 6;
 }
 
 .node.selected circle {

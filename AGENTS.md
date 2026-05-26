@@ -13,6 +13,7 @@ Keep this file brief and operational. Status and progress belong in IMPLEMENTATI
 - Tests: `pnpm -r test`
 - Typecheck: `pnpm -r typecheck`
 - Lint: `pnpm -r lint`
+- Frontend production build: `pnpm --filter @know-grow/frontend build`
 
 ## Operational Notes
 

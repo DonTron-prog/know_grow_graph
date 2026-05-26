@@ -1,17 +1,16 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the backend snapshot/source-revert increment landed. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the frontend graph interaction/shared cleanup increment landed. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
-- Added shared pure graph patch validation/application for add/update/delete node/edge, merge nodes, and split node operations without mutating inputs.
-- Added patch blockers, warnings, `ActionSummary`, and `changedElementIds` handling, with shared tests for valid/invalid patch behavior and merge/split coverage.
-- Implemented backend `POST /api/patch/validate` and `POST /api/patch/apply` using the shared patch engine.
-- Ensured patch apply persists only accepted mutations and returns `422` without mutating `working_graph.json` when blockers exist.
-- Added snapshot graph-file persistence under `snapshots/<snapshotId>.json` plus source-revert and snapshot save/get/load/duplicate routes.
-- Added shared schemas/types for source revert, snapshot create/get/load/duplicate requests and responses.
-- Added backend route tests covering snapshot save/list/get/load/duplicate/revert, invalid create/duplicate request-body ApiError handling, validation/no-mutation paths, missing snapshot `404`, and source immutability preservation.
-- Final validation passed with `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint`.
+- Implemented the frontend P0 graph interaction slice in `apps/frontend/src/App.tsx` plus `apps/frontend/src/graphInteraction.ts`.
+- The central SVG/equivalent renderer now supports zoom, pan, local node dragging, node selection, edge selection, additive multi-select, and background clear that does not clear selection after a pan.
+- Added inspector graph summary, single-node/single-edge details, invalid/deleted selection messaging, and multi-selection summary/eligibility states.
+- Added styling hooks for origin colors, selected outlines, recent-change highlighting, warning state, and invalid state; Raw now exposes selected and changed IDs for debugging.
+- Added frontend graph-interaction helper tests for selection behavior, node/edge ID namespace isolation, selection labels, persisted-layout fallback, and zoom clamping.
+- Removed stale `packages/shared/src/index.js`; `@know-grow/shared` continues to use the source TypeScript export model through `packages/shared/src/index.ts`.
+- Final validation passed with `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
 
 ## Confirmed current state
 
@@ -25,23 +24,23 @@ Plan-only snapshot for the first PoC, refreshed after the backend snapshot/sourc
 - `validateGraphState` covers malformed graph shape, duplicate node IDs, duplicate edge IDs, dangling edge endpoints, and layout entries for missing nodes.
 - `validateGraphPatch`/`applyGraphPatch` now cover patch blocker/warning generation, immutable application, action summaries, changed IDs, merge/split semantics, and direct source-graph mutation blocking.
 - `fixtures/source_graph.example.json` is a checked-in non-private fixture for first render/startup fallback.
-- Frontend now has a Vite/React/TypeScript read-only vertical slice and API-client behavior tests, but graph interaction is still the simple SVG implementation rather than Cytoscape/equivalent canvas behavior.
-- `packages/shared/src/index.js` is still a stale Phase 1 placeholder runtime file while package exports point at `./src/index.ts`; settle runtime/browser consumption and remove or neutralize this stale file during shared packaging cleanup.
+- Frontend now has a Vite/React/TypeScript graph interaction slice: the central SVG/equivalent renderer supports zoom/pan/local node drag, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector selection states, and Raw selected/changed IDs.
+- `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
 - `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
-- Frontend tests now cover API-client behavior; pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
+- Frontend tests now cover API-client behavior and pure graph-interaction helpers; DOM/pointer interaction tests for the actual React/SVG event wiring are still needed as renderer behavior expands.
+- Pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
 
-- **P0 - Implement central graph rendering and interaction.**
-  - Add Cytoscape.js or an equivalent graph renderer with zoom, pan, drag, node selection, edge selection, multi-select, background clear, origin colors, selected outlines, warning/invalid styling hooks, and recent-change highlighting.
-  - Resolve renderer ID handling for node and edge IDs before styling or highlighting depends on globally unique element IDs.
+- **P0 - Complete central graph rendering and interaction follow-through.**
+  - Decide whether the current SVG/equivalent renderer is sufficient for the MVP or whether to replace it with Cytoscape.js before broader editing/Pi flows.
   - Decide how dragged layout coordinates are persisted in the MVP: full graph replacement, snapshot save, or a later dedicated layout flow.
+  - Add DOM/pointer interaction tests for actual React/SVG zoom, pan, drag, selection, multi-select, and background-clear behavior.
 
-- **P0 - Settle shared API runtime parsing and package cleanup.**
+- **P0 - Settle shared API runtime parsing and packaging direction.**
   - Add or reuse shared schemas/types for source meta, source graph, working graph reads, and snapshots if the frontend will runtime-parse API responses with shared contracts.
-  - Choose whether `@know-grow/shared` remains source-imported by Vite or is compiled to JS/declarations for browser/runtime consumption.
-  - Remove or neutralize the stale `packages/shared/src/index.js` placeholder as part of packaging cleanup.
+  - Decide whether `@know-grow/shared` remains source-imported by Vite/backend `tsx` or is compiled to JS/declarations for browser/runtime consumption.
   - Validate that backend and frontend import the same shared contracts without runtime ambiguity.
 
 - **P0 - Implement frontend editing, toolbar operations, undo/redo, and snapshots.**
@@ -53,7 +52,7 @@ Plan-only snapshot for the first PoC, refreshed after the backend snapshot/sourc
 - **P0 - Expand automated validation for implemented P0 behavior.**
   - Continue shared validation coverage for malformed graph edge cases, layout warnings, patch warning thresholds, replacement-edge conflicts, and changed-ID/source-ref conventions not yet pinned by tests.
   - Add backend tests for health/source/working reads, fixture fallback, and no mutation on any remaining uncovered `422` paths.
-  - Expand frontend tests beyond the API client as renderer interaction, selection state, editing, undo/redo, and snapshot flows land.
+  - Expand frontend tests beyond the API client and pure helpers; add actual DOM/pointer interaction coverage for renderer zoom/pan/drag/selection/background clear, then editing, undo/redo, and snapshot flows as they land.
   - Add pi-agent behavior tests once the HTTP bridge exists; avoid misleading green zero-test packages as functionality lands.
   - Keep `pnpm -r test`, `pnpm -r typecheck`, and `pnpm -r lint` as the required validation gates.
 
