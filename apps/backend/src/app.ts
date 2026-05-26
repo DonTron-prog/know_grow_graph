@@ -472,7 +472,7 @@ export function createApp(options: CreateAppOptions): express.Express {
   const app = express();
   const version = options.version ?? "0.1.0";
   const piAgentUrl = options.piAgentUrl ?? process.env.PI_AGENT_URL;
-  const piRequestTimeoutMs = options.piRequestTimeoutMs ?? Number(process.env.PI_REQUEST_TIMEOUT_MS ?? 10_000);
+  const piRequestTimeoutMs = options.piRequestTimeoutMs ?? Number(process.env.PI_REQUEST_TIMEOUT_MS ?? 65_000);
 
   app.use(cors());
   app.use(express.json({ limit: "10mb" }));

@@ -1,6 +1,6 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the completed safe P1 Pi direct JSON increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the completed P1 real pi-agent CLI bridge increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
@@ -30,6 +30,10 @@ Plan-only snapshot for the first PoC, refreshed after the completed safe P1 Pi d
 - Direct JSON validation now returns structured `422 invalid_direct_json_edit` errors for malformed `working_graph` JSON and missing/changed `source_graph`, with backup restore before responding.
 - Frontend direct JSON mode calls `/api/pi/direct-edit` and accepts only the backend-reloaded valid graph state; focused tests cover backend reload/restore/source-checksum behavior, frontend API/Pi Panel acceptance/error paths, and pi-agent mock direct editing.
 - Final validation after reviewer fixes passed: `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
+- Completed the P1 real pi-agent CLI bridge slice: `apps/pi-agent` keeps mock mode by default and can opt into a real Pi CLI adapter with `PI_AGENT_MODE=real|pi|cli`.
+- The real adapter invokes `PI_CLI_COMMAND` (default `pi`) in JSONL mode from `GRAPH_DATA_DIR`, prepends optional `PI_CLI_ARGS`, uses `PI_CLI_TIMEOUT_MS` (default 60000), disables session/context/templates/skills/extensions, exposes no tools for patch mode, and exposes read/write/edit/bash tools for direct JSON mode; compose now passes these opt-in variables through to the pi-agent container and sets backend `PI_REQUEST_TIMEOUT_MS` to 65000 so the CLI timeout fires first.
+- The adapter parses final assistant JSON or plain-text patch-mode messages, preserves direct JSON backend reload/validation semantics, kills child processes on client abort, reports timeout even if a child exits cleanly after SIGTERM, and has focused pi-agent tests.
+- Validation for the real CLI bridge slice passed: `pnpm --filter @know-grow/pi-agent test`, `pnpm --filter @know-grow/pi-agent typecheck`, `docker-compose config`, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
 
 ## Current follow-up focus
 
@@ -50,16 +54,16 @@ Plan-only snapshot for the first PoC, refreshed after the completed safe P1 Pi d
 - Frontend now has a Vite/React/TypeScript graph interaction and editing slice: the MVP SVG renderer supports zoom/pan/node drag, drag-end layout persistence, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector label/type/notes edits, toolbar graph/snapshot actions, undo/redo through full working-graph replacement, mutation feedback, and Raw selected/changed IDs.
 - `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
 - The frontend API client parses successful backend response envelopes with shared schemas, exposes source graph fetch, preserves `ApiError` behavior for failed responses and network failures, and tests malformed successful response handling.
-- `apps/pi-agent/src/index.js` now exposes a mock HTTP bridge with `/health`, `/api/pi/chat`, and `/api/pi/direct-edit`; patch mode proposes typed graph changes, and direct JSON mode edits the shared mutable graph file for local testing. The real Pi invocation protocol is still not implemented.
+- `apps/pi-agent/src/index.js` now exposes an HTTP bridge with `/health`, `/api/pi/chat`, and `/api/pi/direct-edit`; mock mode remains the default for local testing, while `PI_AGENT_MODE=real|pi|cli` enables the real Pi CLI adapter for patch and direct JSON modes.
 - Dockerfiles exist for backend, frontend, and pi-agent. `docker-compose.yml` runs the stack with backend and pi-agent sharing host `./.data` at `/graph-data`; backend uses `DATA_DIR=/graph-data` and `PI_AGENT_URL=http://pi-agent:4100`; pi-agent uses `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` volume.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
 - Frontend tests now cover API-client mutation behavior, graph mutation helpers, pure graph-interaction helpers, and App-level jsdom React coverage for actual SVG selection, edge selection, multi-select, pan translate, pan-safe background clear, zoom, drag-end layout persistence, inspector edit/rejected rollback, add node, add edge, delete selected, merge selected, split selected, undo/redo, save/load/duplicate/revert snapshots, prompt/confirm queue consumption, StatusBar feedback, rejected replacement recovery, and Pi patch/direct JSON flows.
-- Pi-agent bridge behavior has focused test coverage for health, patch chat, and direct JSON mock editing.
+- Pi-agent bridge behavior has focused test coverage for health, patch chat, direct JSON mock editing, and real CLI adapter command/protocol handling.
 
 ## Prioritized remaining work
 
 - **P1 - Complete Pi integration beyond the mock Pi bridge.**
-  - Replace mock patch/direct JSON behavior with the real Pi bridge protocol once the invocation contract, timeout behavior, and raw-output shape are finalized.
+  - The pi-agent now has a real CLI adapter in addition to the default mock mode; remaining work is live Pi credential/container smoke testing and possible protocol hardening as real outputs/failures are observed.
   - Continue hardening Pi Panel error/status transitions as real bridge failures become observable; patch proposals already flow through Actions/Raw and apply via `/api/patch/apply`, and direct JSON accepts only backend-reloaded valid graph state.
 
 - **P2 - Document and run a manual visual smoke path.**
@@ -82,4 +86,7 @@ Plan-only snapshot for the first PoC, refreshed after the completed safe P1 Pi d
 - Clarify whether node IDs and edge IDs are separate namespaces or globally unique element IDs for renderer/API purposes.
 - Decide whether shared Zod schemas should remain permissive to unknown fields and empty labels/instructions, or become stricter before user-authored graph edits land.
 - Pick conservative warning thresholds for “many nodes,” “many source-derived edges,” disconnected components, and missing rationale.
-- Define real pi-agent invocation protocol, timeout behavior, raw-output shape, and mock-to-real migration path for both patch and direct JSON modes.
+- Harden the real pi-agent CLI protocol if live Pi JSONL/final-message variants differ from the tested adapter contract.
+- Confirm whether `rawPiOutput` should continue exposing adapter events/stderr/finalText as currently implemented, or be normalized/redacted further before broader use.
+- Confirm whether the current timeout contract (`PI_CLI_TIMEOUT_MS` default 60000, backend `PI_REQUEST_TIMEOUT_MS` default 65000) is appropriate for real graph edits.
+- Decide the mock-to-real rollout path: mock remains default, real mode is opt-in via `PI_AGENT_MODE=real|pi|cli`, compose passes the CLI env through, and live container credential/config plus Pi CLI availability still need smoke validation.

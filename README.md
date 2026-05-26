@@ -158,6 +158,8 @@ BACKEND_HOST_PORT=3101 FRONTEND_HOST_PORT=5174 PI_AGENT_HOST_PORT=4101 \
 
 The backend uses `DATA_DIR=/graph-data` and fixture fallback from `/app/fixtures/source_graph.example.json`. The pi-agent uses `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` Docker volume for future Pi config/session state instead of the host home directory.
 
+The pi-agent defaults to mock mode. To enable the real Pi CLI bridge, set `PI_AGENT_MODE=real` in the pi-agent process/container environment; optional overrides are `PI_CLI_COMMAND` (default `pi`), `PI_CLI_ARGS` (space-delimited string or JSON array of extra CLI args), and `PI_CLI_TIMEOUT_MS` (default `60000`). The backend `PI_REQUEST_TIMEOUT_MS` defaults to `65000` so the pi-agent CLI timeout fires first. In `direct_json` mode the Pi CLI runs with cwd set to the shared `GRAPH_DATA_DIR`, so it reads/writes the same `/graph-data` files that the backend reloads and validates. The compose file passes these variables through, but real mode still requires the configured Pi CLI command to be available inside the pi-agent container or process.
+
 ## Implementation Principle
 
 Build the smallest complete system that can be validated visually:
