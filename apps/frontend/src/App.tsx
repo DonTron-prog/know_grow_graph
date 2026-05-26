@@ -60,6 +60,7 @@ export function App({ apiClient }: AppProps) {
   const [activeSnapshotName, setActiveSnapshotName] = useState<string | null>(null);
   const [lastActionSummary, setLastActionSummary] = useState<ActionSummary | null>(null);
   const [rawDetails, setRawDetails] = useState<unknown>(null);
+  const [inspectorResetVersion, setInspectorResetVersion] = useState(0);
   const graphRef = useRef<GraphState | null>(null);
   const mutationQueueRef = useRef(Promise.resolve());
 
@@ -126,6 +127,7 @@ export function App({ apiClient }: AppProps) {
     setErrorMessage(message);
     setRawDetails(error instanceof ApiClientError ? { code: error.code, status: error.status, message: error.message, details: error.details } : { message });
     setPiStatus("failed");
+    setInspectorResetVersion((version) => version + 1);
   }
 
   function acceptWorkingGraph(graph: GraphState, options: { pushUndo?: boolean; redoGraph?: GraphState | null; changedIds?: string[]; actionSummary?: ActionSummary | null; raw?: unknown; unsaved?: boolean } = {}): void {
@@ -400,7 +402,7 @@ export function App({ apiClient }: AppProps) {
         onSnapshotAction={handleSnapshotAction}
       />
       <section className="main-grid" aria-label="Workbench regions">
-        <InspectorPanel selection={selection} graph={data?.workingGraph} nodes={selectedNodes} edges={selectedEdges} unsavedChanges={unsavedChanges} activeSnapshotName={activeSnapshotName} onNodeUpdate={handleNodeUpdate} onEdgeUpdate={handleEdgeUpdate} />
+        <InspectorPanel key={inspectorResetVersion} selection={selection} graph={data?.workingGraph} nodes={selectedNodes} edges={selectedEdges} unsavedChanges={unsavedChanges} activeSnapshotName={activeSnapshotName} onNodeUpdate={handleNodeUpdate} onEdgeUpdate={handleEdgeUpdate} />
         <GraphCanvas graph={data?.workingGraph} status={status} selected={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} onSelect={setSelection} onLayoutChange={handleLayoutChange} />
         <PiPanel activeTab={activePiTab} onTabChange={setActivePiTab} piStatus={piStatus} status={status} graph={data?.workingGraph} selection={selection} changedElementIds={changedElementIds} errorMessage={errorMessage} actionSummary={lastActionSummary} rawDetails={rawDetails} />
       </section>

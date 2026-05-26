@@ -1,6 +1,6 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 editing increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 App-level test increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
@@ -10,15 +10,16 @@ Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 
 - Added styling hooks for origin colors, selected outlines, recent-change highlighting, warning state, and invalid state; Raw now exposes selected and changed IDs for debugging.
 - Completed the frontend P0 editing increment: API-client mutation methods, toolbar add/delete/merge/split/save/load/duplicate/revert wiring, inspector label/type/notes edits, frontend undo/redo restores via `PUT /api/working/graph`, and drag-end layout persistence with canvas-coordinate preservation.
 - Added mutation feedback across Actions, Raw, and StatusBar so successful operations, warnings, backend errors, patch results, changed IDs, and active snapshot state are visible without corrupting the current UI graph.
-- Added frontend tests for API mutations and graph mutation helpers, in addition to the existing graph-interaction helper coverage for selection behavior, node/edge ID namespace isolation, selection labels, persisted-layout fallback, and zoom clamping.
-- Fixed reviewer findings from the editing increment: layout re-normalization, keyed inspector editors, serialized inspector saves, delete via patch warnings, active snapshot reset on undo/redo, and rejected drag reset.
+- Added frontend tests for API mutations, graph mutation helpers, graph-interaction helpers, and App-level jsdom React behavior in `apps/frontend/test/App.test.ts`.
+- Extended App-level coverage for Add Edge, Delete Selected, Merge Selected, and Split Selected toolbar wiring; tests now assert pan translate, deeper snapshot state/status behavior, prompt/confirm queue consumption, and visible rejected inspector edit rollback.
+- Fixed reviewer findings from the editing increment: layout re-normalization, keyed inspector editors, serialized inspector saves, delete via patch warnings, active snapshot reset on undo/redo, rejected drag reset, and rejected inspector mutation remount/reset via `inspectorResetVersion` so uncontrolled inputs return to last accepted graph values.
 - Removed stale `packages/shared/src/index.js`; `@know-grow/shared` continues to use the source TypeScript export model through `packages/shared/src/index.ts`.
-- Final validation passed with `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
+- Root Node engine is now `>=22.13.0` because jsdom 29 requires Node 22.13+ or a compatible 20/24 line.
+- After post-review refinements, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build` passed.
 
 ## Current follow-up focus
 
-- Add DOM/App-level pointer tests for the actual React/SVG event wiring: zoom, pan, drag, drag-end persistence, selection, multi-select, and background clear.
-- Add App-level flow tests for editing, undo/redo, snapshot save/load/duplicate/revert, mutation feedback, rejected mutations, and snapshot/selection state transitions.
+- Settle shared API runtime parsing and packaging only as needed.
 - Keep the existing SVG renderer for the MVP; defer any Cytoscape.js switch until after MVP evidence shows the SVG path is insufficient.
 
 ## Confirmed current state
@@ -37,15 +38,10 @@ Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 
 - `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
 - `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
-- Frontend tests now cover API-client mutation behavior, graph mutation helpers, and pure graph-interaction helpers; DOM/App-level pointer and flow tests for the actual React/SVG/UI wiring are still needed.
+- Frontend tests now cover API-client mutation behavior, graph mutation helpers, pure graph-interaction helpers, and App-level jsdom React coverage for actual SVG selection, edge selection, multi-select, pan translate, pan-safe background clear, zoom, drag-end layout persistence, inspector edit/rejected rollback, add node, add edge, delete selected, merge selected, split selected, undo/redo, save/load/duplicate/revert snapshots, prompt/confirm queue consumption, StatusBar feedback, and rejected replacement recovery.
 - Pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
-
-- **P0 - Add DOM/App-level frontend behavior coverage.**
-  - Cover actual React/SVG zoom, pan, drag, drag-end persistence, selection, multi-select, and background-clear behavior.
-  - Cover editing, undo/redo, snapshot save/load/duplicate/revert, mutation feedback, warning/error display, and rejected mutation recovery at the App/UI level.
-  - Keep `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build` as the required validation gates.
 
 - **P0 - Settle shared API runtime parsing and packaging only as needed.**
   - Confirm whether the frontend should runtime-parse source meta, source graph, working graph, and snapshot responses with shared schemas.
