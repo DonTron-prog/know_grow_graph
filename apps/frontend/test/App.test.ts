@@ -249,6 +249,10 @@ class MockApiClient implements FrontendApiClient {
     return { graphId: "source-test", name: "Source Test", stateType: "source", nodeCount: 2, edgeCount: 1, readOnly: true };
   }
 
+  async fetchSourceGraph(): Promise<GraphState> {
+    return { ...sampleGraph(), graphId: "source-test", name: "Source Test", stateType: "source" };
+  }
+
   async fetchWorkingGraph(): Promise<GraphState> {
     return structuredClone(this.graph);
   }

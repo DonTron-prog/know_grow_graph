@@ -1,18 +1,27 @@
-import type {
-  ApplyPatchResponse,
-  CreateSnapshotRequest,
-  CreateSnapshotResponse,
-  DuplicateSnapshotRequest,
-  DuplicateSnapshotResponse,
-  GraphMeta,
-  GraphPatch,
-  GraphState,
-  HealthResponse,
-  ListSnapshotsResponse,
-  LoadSnapshotResponse,
-  ReplaceWorkingGraphResponse,
-  RevertToSourceResponse,
-  SnapshotMeta
+import {
+  applyPatchResponseSchema,
+  createSnapshotResponseSchema,
+  duplicateSnapshotResponseSchema,
+  graphMetaSchema,
+  graphStateSchema,
+  healthResponseSchema,
+  listSnapshotsResponseSchema,
+  loadSnapshotResponseSchema,
+  replaceWorkingGraphResponseSchema,
+  revertToSourceResponseSchema,
+  type ApplyPatchResponse,
+  type CreateSnapshotRequest,
+  type CreateSnapshotResponse,
+  type DuplicateSnapshotRequest,
+  type DuplicateSnapshotResponse,
+  type GraphMeta,
+  type GraphPatch,
+  type GraphState,
+  type HealthResponse,
+  type LoadSnapshotResponse,
+  type ReplaceWorkingGraphResponse,
+  type RevertToSourceResponse,
+  type SnapshotMeta
 } from "@know-grow/shared";
 
 export class ApiClientError extends Error {
@@ -31,6 +40,7 @@ export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promis
 export type FrontendApiClient = {
   fetchHealth: () => Promise<HealthResponse>;
   fetchSourceMeta: () => Promise<GraphMeta>;
+  fetchSourceGraph: () => Promise<GraphState>;
   fetchWorkingGraph: () => Promise<GraphState>;
   fetchSnapshots: () => Promise<SnapshotMeta[]>;
   replaceWorkingGraph: (graph: GraphState) => Promise<ReplaceWorkingGraphResponse>;
@@ -49,6 +59,12 @@ type ApiErrorBody = {
   };
 };
 
+type SafeParser<T> = {
+  safeParse: (input: unknown) =>
+    | { success: true; data: T }
+    | { success: false; error: { issues: unknown[] } };
+};
+
 export function normalizeApiBaseUrl(value: string | undefined): string {
   const base = value?.trim() || "http://localhost:3001/api";
   return base.endsWith("/") ? base.slice(0, -1) : base;
@@ -57,7 +73,7 @@ export function normalizeApiBaseUrl(value: string | undefined): string {
 export function createApiClient(baseUrl: string, fetchImpl: FetchLike = fetch): FrontendApiClient {
   const normalizedBaseUrl = normalizeApiBaseUrl(baseUrl);
 
-  async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  async function requestJson<T>(path: string, schema: SafeParser<T>, init?: RequestInit): Promise<T> {
     const response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
       ...init,
       headers: {
@@ -78,26 +94,39 @@ export function createApiClient(baseUrl: string, fetchImpl: FetchLike = fetch): 
       );
     }
 
-    return body as T;
+    return parseSuccessfulResponse(path, response.status, body, schema);
   }
 
-  const postJson = <T>(path: string, body: unknown = {}): Promise<T> => requestJson<T>(path, { method: "POST", body: JSON.stringify(body) });
+  const postJson = <T>(path: string, schema: SafeParser<T>, body: unknown = {}): Promise<T> =>
+    requestJson(path, schema, { method: "POST", body: JSON.stringify(body) });
 
   return {
-    fetchHealth: () => requestJson<HealthResponse>("/health"),
-    fetchSourceMeta: () => requestJson<GraphMeta>("/source/meta"),
-    fetchWorkingGraph: () => requestJson<GraphState>("/working/graph"),
+    fetchHealth: () => requestJson("/health", healthResponseSchema),
+    fetchSourceMeta: () => requestJson("/source/meta", graphMetaSchema),
+    fetchSourceGraph: () => requestJson("/source/graph", graphStateSchema),
+    fetchWorkingGraph: () => requestJson("/working/graph", graphStateSchema),
     fetchSnapshots: async () => {
-      const response = await requestJson<ListSnapshotsResponse>("/snapshots");
+      const response = await requestJson("/snapshots", listSnapshotsResponseSchema);
       return response.snapshots;
     },
-    replaceWorkingGraph: (graph) => requestJson<ReplaceWorkingGraphResponse>("/working/graph", { method: "PUT", body: JSON.stringify({ graph }) }),
-    createSnapshot: (request) => postJson<CreateSnapshotResponse>("/snapshots", request),
-    loadSnapshot: (snapshotId) => postJson<LoadSnapshotResponse>(`/snapshots/${encodeURIComponent(snapshotId)}/load`),
-    duplicateSnapshot: (snapshotId, request) => postJson<DuplicateSnapshotResponse>(`/snapshots/${encodeURIComponent(snapshotId)}/duplicate`, request),
-    revertToSource: () => postJson<RevertToSourceResponse>("/working/revert-to-source"),
-    applyPatch: (patch) => postJson<ApplyPatchResponse>("/patch/apply", { patch })
+    replaceWorkingGraph: (graph) => requestJson("/working/graph", replaceWorkingGraphResponseSchema, { method: "PUT", body: JSON.stringify({ graph }) }),
+    createSnapshot: (request) => postJson("/snapshots", createSnapshotResponseSchema, request),
+    loadSnapshot: (snapshotId) => postJson(`/snapshots/${encodeURIComponent(snapshotId)}/load`, loadSnapshotResponseSchema),
+    duplicateSnapshot: (snapshotId, request) => postJson(`/snapshots/${encodeURIComponent(snapshotId)}/duplicate`, duplicateSnapshotResponseSchema, request),
+    revertToSource: () => postJson("/working/revert-to-source", revertToSourceResponseSchema),
+    applyPatch: (patch) => postJson("/patch/apply", applyPatchResponseSchema, { patch })
   };
+}
+
+function parseSuccessfulResponse<T>(path: string, status: number, body: unknown, schema: SafeParser<T>): T {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiClientError(`Backend returned invalid response for ${path}.`, status, "invalid_response", {
+      issues: parsed.error.issues
+    });
+  }
+
+  return parsed.data;
 }
 
 async function readJson(response: Response): Promise<unknown> {

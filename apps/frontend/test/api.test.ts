@@ -24,6 +24,9 @@ test("frontend API client fetches implemented backend read endpoints", async () 
     if (String(input).endsWith("/source/meta")) {
       return jsonResponse({ graphId: "source-example", name: "Source", stateType: "source", nodeCount: 1, edgeCount: 0, readOnly: true });
     }
+    if (String(input).endsWith("/source/graph")) {
+      return jsonResponse({ ...sampleGraph, graphId: "source-example", name: "Source", stateType: "source" });
+    }
     if (String(input).endsWith("/working/graph")) {
       return jsonResponse(sampleGraph);
     }
@@ -35,18 +38,21 @@ test("frontend API client fetches implemented backend read endpoints", async () 
 
   const apiClient = createApiClient("http://backend.test/api/", fetchImpl);
 
-  const [sourceMeta, graph, snapshots] = await Promise.all([
+  const [sourceMeta, sourceGraph, graph, snapshots] = await Promise.all([
     apiClient.fetchSourceMeta(),
+    apiClient.fetchSourceGraph(),
     apiClient.fetchWorkingGraph(),
     apiClient.fetchSnapshots()
   ]);
 
   assert.deepEqual(requestedUrls, [
     "http://backend.test/api/source/meta",
+    "http://backend.test/api/source/graph",
     "http://backend.test/api/working/graph",
     "http://backend.test/api/snapshots"
   ]);
   assert.equal(sourceMeta.readOnly, true);
+  assert.equal(sourceGraph.stateType, "source");
   assert.equal(graph.name, "Working Example");
   assert.equal(snapshots[0]?.snapshotId, "snap-1");
 });
@@ -115,6 +121,23 @@ test("frontend API client preserves backend ApiError details", async () => {
       assert.equal(error.status, 422);
       assert.equal(error.code, "invalid_working_graph");
       assert.deepEqual(error.details, { validationResults: [] });
+      return true;
+    }
+  );
+});
+
+test("frontend API client rejects malformed successful backend responses", async () => {
+  const fetchImpl: FetchLike = async () => jsonResponse({ graphId: "broken", name: "Broken", nodes: [], edges: [] });
+  const apiClient = createApiClient("http://backend.test/api", fetchImpl);
+
+  await assert.rejects(
+    apiClient.fetchWorkingGraph(),
+    (error) => {
+      assert.ok(error instanceof ApiClientError);
+      assert.equal(error.status, 200);
+      assert.equal(error.code, "invalid_response");
+      assert.match(error.message, /invalid response/);
+      assert.ok(error.details && typeof error.details === "object" && "issues" in error.details);
       return true;
     }
   );

@@ -1,6 +1,6 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 App-level test increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
+Plan-only snapshot for the first PoC, refreshed after the completed P0 shared API runtime parsing increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
 
 ## Completed in the latest BUILD iteration
 
@@ -16,10 +16,12 @@ Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 
 - Removed stale `packages/shared/src/index.js`; `@know-grow/shared` continues to use the source TypeScript export model through `packages/shared/src/index.ts`.
 - Root Node engine is now `>=22.13.0` because jsdom 29 requires Node 22.13+ or a compatible 20/24 line.
 - After post-review refinements, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build` passed.
+- Completed the P0 shared API runtime parsing increment: the frontend API client now parses successful backend responses with shared Zod schemas, exposes source graph fetch, preserves existing `ApiError` behavior, and has tests for malformed successful responses.
+- Validation passed for the shared API runtime parsing increment: `pnpm --filter @know-grow/frontend test`, `pnpm --filter @know-grow/frontend typecheck`, `pnpm --filter @know-grow/frontend lint`, `pnpm --filter @know-grow/shared typecheck`, and `pnpm --filter @know-grow/frontend build`.
+- Final full-workspace validation after the P0 runtime parsing changes passed: `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
 
 ## Current follow-up focus
 
-- Settle shared API runtime parsing and packaging only as needed.
 - Keep the existing SVG renderer for the MVP; defer any Cytoscape.js switch until after MVP evidence shows the SVG path is insufficient.
 
 ## Confirmed current state
@@ -36,16 +38,13 @@ Plan-only snapshot for the first PoC, refreshed after the completed frontend P0 
 - `fixtures/source_graph.example.json` is a checked-in non-private fixture for first render/startup fallback.
 - Frontend now has a Vite/React/TypeScript graph interaction and editing slice: the MVP SVG renderer supports zoom/pan/node drag, drag-end layout persistence, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector label/type/notes edits, toolbar graph/snapshot actions, undo/redo through full working-graph replacement, mutation feedback, and Raw selected/changed IDs.
 - `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
+- The frontend API client parses successful backend response envelopes with shared schemas, exposes source graph fetch, preserves `ApiError` behavior for failed responses and network failures, and tests malformed successful response handling.
 - `apps/pi-agent/src/index.js` is still a console-log scaffold; there is no Pi HTTP bridge, Docker stack, or direct-JSON workflow yet.
 - Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
 - Frontend tests now cover API-client mutation behavior, graph mutation helpers, pure graph-interaction helpers, and App-level jsdom React coverage for actual SVG selection, edge selection, multi-select, pan translate, pan-safe background clear, zoom, drag-end layout persistence, inspector edit/rejected rollback, add node, add edge, delete selected, merge selected, split selected, undo/redo, save/load/duplicate/revert snapshots, prompt/confirm queue consumption, StatusBar feedback, and rejected replacement recovery.
 - Pi-agent tests still execute zero behavior tests until the HTTP bridge lands.
 
 ## Prioritized remaining work
-
-- **P0 - Settle shared API runtime parsing and packaging only as needed.**
-  - Confirm whether the frontend should runtime-parse source meta, source graph, working graph, and snapshot responses with shared schemas.
-  - Validate that backend and frontend import the same shared contracts without runtime ambiguity.
 
 - **P1 - Implement Pi integration after the frontend P0 test follow-through.**
   - Replace the pi-agent scaffold with a mockable HTTP bridge and backend health reporting.
