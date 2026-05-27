@@ -3,7 +3,9 @@ import type { Core, EventObject, NodeSingular, EdgeSingular } from 'cytoscape';
 import './styles/app.css';
 import { toCytoscapeElements } from './graph/cytoscapeAdapter';
 import { connectedEdges, relationshipCounts } from './graph/metrics';
-import { loadGraph, saveLayout } from './graph/storage';
+import { createConcept, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from './graph/mutations';
+import { loadGraph, saveGraph, saveLayout } from './graph/storage';
+import type { GraphMutationResult } from './graph/mutations';
 import type { GraphPosition, KnowledgeGraph } from './graph/types';
 
 interface AppState {
@@ -14,6 +16,7 @@ interface AppState {
   layoutStatus: 'saved' | 'unsaved';
   loading: boolean;
   saving: boolean;
+  editMode: boolean;
   message?: string;
   error?: string;
 }
@@ -26,12 +29,15 @@ if (!appRoot) {
 
 const app = appRoot;
 
+const initialLoad = loadGraph();
+
 let state: AppState = {
-  graph: loadGraph().graph,
-  source: 'fixture',
+  graph: initialLoad.graph,
+  source: initialLoad.source,
   layoutStatus: 'saved',
   loading: false,
   saving: false,
+  editMode: false,
 };
 let cy: Core | undefined;
 
@@ -49,6 +55,7 @@ function loadIntoState(): void {
       layoutStatus: 'saved',
       loading: false,
       saving: false,
+      editMode: state.editMode,
       message: result.recoveryMessage ?? `Loaded ${result.source === 'working' ? 'saved working graph' : 'example Agentic AI graph'}.`,
       error: result.validation.errors.length > 0 ? result.validation.errors.map((error) => error.message).join(' ') : undefined,
     };
@@ -65,12 +72,17 @@ function renderShell(): void {
       <header class="toolbar" aria-label="Graph actions">
         <div class="brand">
           <strong>Know Grow Graph</strong>
-          <span>${state.graph.name}</span>
+          <span>${escapeHtml(state.graph.name)}</span>
         </div>
         <button type="button" data-action="reload">Reload graph</button>
         <button type="button" data-action="fit">Fit</button>
         <button type="button" data-action="reset-layout">Reset layout</button>
         <button type="button" data-action="save-layout" ${state.saving ? 'disabled' : ''}>${state.saving ? 'Saving…' : 'Save layout'}</button>
+        <button type="button" data-action="toggle-edit-mode" class="${state.editMode ? 'active' : ''}">${state.editMode ? 'Content editing active' : 'Enable content editing'}</button>
+        <button type="button" data-action="add-concept" ${state.editMode ? '' : 'disabled'}>Add concept</button>
+        <button type="button" data-action="add-relationship" ${state.editMode ? '' : 'disabled'}>Add relationship</button>
+        <button type="button" data-action="edit-selected" ${state.editMode && state.selectedId ? '' : 'disabled'}>Edit selected</button>
+        <button type="button" data-action="delete-selected" ${state.editMode && state.selectedId ? '' : 'disabled'}>Delete selected</button>
       </header>
       <section class="status-strip" aria-live="polite">
         <span>${state.loading ? 'Loading graph…' : `${state.graph.nodes.length} concepts`}</span>
@@ -78,6 +90,7 @@ function renderShell(): void {
         <span>${state.selectedId ? '1 selected' : '0 selected'}</span>
         <span>Layout ${state.layoutStatus}</span>
         <span>Source: ${state.source}</span>
+        <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>
       </section>
       ${state.message ? `<p class="message">${escapeHtml(state.message)}</p>` : ''}
       ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)} <button type="button" data-action="reload">Retry</button></p>` : ''}
@@ -162,7 +175,8 @@ function updateStatusStrip(): void {
     <span>${state.graph.edges.length} relationships</span>
     <span>${state.selectedId ? '1 selected' : '0 selected'}</span>
     <span>Layout ${state.layoutStatus}</span>
-    <span>Source: ${state.source}</span>`;
+    <span>Source: ${state.source}</span>
+    <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>`;
 }
 
 function mountGraph(): void {
@@ -176,6 +190,7 @@ function mountGraph(): void {
       elements: toCytoscapeElements(state.graph),
       layout: { name: 'preset', fit: true, padding: 50 },
       wheelSensitivity: 0.2,
+      autoungrabify: !state.editMode,
       style: [
         {
           selector: 'node',
@@ -225,10 +240,19 @@ function mountGraph(): void {
     });
     cy.on('mouseover', 'node, edge', (event) => event.target.addClass('hovered'));
     cy.on('mouseout', 'node, edge', (event) => event.target.removeClass('hovered'));
-    cy.on('dragfree', 'node', () => {
-      state.layoutStatus = 'unsaved';
-      updateStatusStrip();
+    cy.on('dragfree', 'node', (event) => {
+      if (!state.editMode) return;
+      try {
+        state.graph = moveConcept(state.graph, event.target.id(), event.target.position()).graph;
+        state.layoutStatus = 'unsaved';
+        updateStatusStrip();
+      } catch (error) {
+        state.error = error instanceof Error ? error.message : 'Concept repositioning failed.';
+        renderShell();
+        mountGraph();
+      }
     });
+    if (state.selectedId) cy.getElementById(state.selectedId).select();
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'Graph rendering failed.';
     renderShell();
@@ -269,15 +293,153 @@ function handleAction(action: string | undefined): void {
       break;
     case 'reset-layout':
       cy?.layout({ name: 'cose', animate: false, padding: 50 }).run();
+      rememberCurrentLayout();
       state.layoutStatus = 'unsaved';
       updateStatusStrip();
       break;
     case 'save-layout':
       saveCurrentLayout();
       break;
+    case 'toggle-edit-mode':
+      state.editMode = !state.editMode;
+      state.message = state.editMode ? 'Content editing is active. Changes are validated before replacing the working graph.' : 'Review mode is active. Content changes and direct concept dragging are disabled.';
+      renderShell();
+      mountGraph();
+      break;
+    case 'add-concept':
+      addConceptFromPrompt();
+      break;
+    case 'add-relationship':
+      addRelationshipFromPrompt();
+      break;
+    case 'edit-selected':
+      editSelectedFromPrompt();
+      break;
+    case 'delete-selected':
+      deleteSelectedFromPrompt();
+      break;
     case 'clear-selection':
       clearSelection();
       break;
+  }
+}
+
+function ensureEditing(): boolean {
+  if (state.editMode) return true;
+  state.error = 'Enable content editing before changing the graph.';
+  renderShell();
+  mountGraph();
+  return false;
+}
+
+function visibleCenter(): GraphPosition {
+  if (!cy) return { x: 0, y: 0 };
+  const extent = cy.extent();
+  return { x: (extent.x1 + extent.x2) / 2, y: (extent.y1 + extent.y2) / 2 };
+}
+
+function applyMutation(message: string, mutation: () => GraphMutationResult, selectKind?: 'concept' | 'relationship'): void {
+  if (!ensureEditing()) return;
+
+  try {
+    const result = mutation();
+    const savedGraph = saveGraph(result.graph);
+    state.graph = savedGraph;
+    state.source = 'working';
+    state.layoutStatus = 'saved';
+    state.message = message;
+    state.error = undefined;
+    state.selectedKind = selectKind;
+    state.selectedId = selectKind ? result.changedId : undefined;
+    renderShell();
+    mountGraph();
+    if (state.selectedId) cy?.getElementById(state.selectedId).select();
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : 'Graph change was rejected.';
+    state.message = undefined;
+    renderShell();
+    mountGraph();
+  }
+}
+
+function addConceptFromPrompt(): void {
+  if (!ensureEditing()) return;
+  const label = window.prompt('Concept label');
+  if (label === null) return;
+  const type = window.prompt('Concept type', 'concept');
+  if (type === null) return;
+  const notes = window.prompt('Concept notes (optional)', '') ?? undefined;
+  applyMutation('Concept added to the working graph.', () => createConcept(state.graph, { label, type, notes, position: visibleCenter() }), 'concept');
+}
+
+function addRelationshipFromPrompt(): void {
+  if (!ensureEditing()) return;
+  const defaultSource = state.selectedKind === 'concept' ? state.selectedId : state.graph.nodes[0]?.id;
+  const source = window.prompt('Source concept id', defaultSource ?? '');
+  if (source === null) return;
+  const target = window.prompt('Target concept id', state.graph.nodes.find((node) => node.id !== source)?.id ?? '');
+  if (target === null) return;
+  const label = window.prompt('Relationship label');
+  if (label === null) return;
+  const notes = window.prompt('Relationship notes (optional)', '') ?? undefined;
+  applyMutation('Relationship added to the working graph.', () => createRelationship(state.graph, { source, target, label, notes }), 'relationship');
+}
+
+function editSelectedFromPrompt(): void {
+  if (!ensureEditing() || !state.selectedId || !state.selectedKind) return;
+
+  if (state.selectedKind === 'concept') {
+    const concept = state.graph.nodes.find((node) => node.id === state.selectedId);
+    if (!concept) {
+      state.error = 'Selected concept is no longer available.';
+      renderShell();
+      mountGraph();
+      return;
+    }
+    const label = window.prompt('Concept label', concept.label);
+    if (label === null) return;
+    const type = window.prompt('Concept type', concept.type);
+    if (type === null) return;
+    const notes = window.prompt('Concept notes (optional)', concept.notes ?? '') ?? undefined;
+    applyMutation('Concept updated in the working graph.', () => updateConcept(state.graph, concept.id, { label, type, notes }), 'concept');
+    return;
+  }
+
+  const relationship = state.graph.edges.find((edge) => edge.id === state.selectedId);
+  if (!relationship) {
+    state.error = 'Selected relationship is no longer available.';
+    renderShell();
+    mountGraph();
+    return;
+  }
+  const label = window.prompt('Relationship label', relationship.label);
+  if (label === null) return;
+  const notes = window.prompt('Relationship notes (optional)', relationship.notes ?? '') ?? undefined;
+  applyMutation('Relationship updated in the working graph.', () => updateRelationship(state.graph, relationship.id, { label, notes }), 'relationship');
+}
+
+function deleteSelectedFromPrompt(): void {
+  if (!ensureEditing() || !state.selectedId || !state.selectedKind) return;
+  const selectedId = state.selectedId;
+  const selectedKind = state.selectedKind;
+  const connectedCount = selectedKind === 'concept' ? connectedEdges(state.graph, selectedId).length : 0;
+  const warning = selectedKind === 'concept' && connectedCount > 0 ? ` This will also remove ${connectedCount} connected relationship${connectedCount === 1 ? '' : 's'} to prevent dangling references.` : '';
+  if (!window.confirm(`Delete selected ${selectedKind}?${warning}`)) return;
+
+  applyMutation(
+    `${selectedKind === 'concept' ? 'Concept' : 'Relationship'} deleted from the working graph.`,
+    () => selectedKind === 'concept' ? deleteConcept(state.graph, selectedId) : deleteRelationship(state.graph, selectedId),
+  );
+}
+
+function rememberCurrentLayout(): void {
+  if (!cy) return;
+  try {
+    cy.nodes().forEach((node) => {
+      state.graph = moveConcept(state.graph, node.id(), node.position()).graph;
+    });
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : 'Layout update failed.';
   }
 }
 

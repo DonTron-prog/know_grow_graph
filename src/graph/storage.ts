@@ -1,4 +1,5 @@
 import fixtureGraph from '../../fixtures/source_graph.example.json';
+import { requireFinitePosition } from './positions';
 import { requireValidGraph, validateGraph } from './validation';
 import type { GraphPosition, GraphValidationResult, KnowledgeGraph } from './types';
 
@@ -52,19 +53,26 @@ export function loadGraph(storage: GraphStorageLike | undefined = globalThis.loc
   }
 }
 
-export function saveLayout(graph: KnowledgeGraph, positions: Record<string, GraphPosition>, storage: GraphStorageLike | undefined = globalThis.localStorage): KnowledgeGraph {
-  const nextGraph: KnowledgeGraph = {
-    ...graph,
-    stateType: 'working',
-    layout: Object.fromEntries(graph.nodes.map((node) => [node.id, positions[node.id] ?? graph.layout?.[node.id] ?? { x: 0, y: 0 }])),
-    updatedAt: new Date().toISOString(),
-  };
-
-  const validation = validateGraph(nextGraph);
+export function saveGraph(graph: KnowledgeGraph, storage: GraphStorageLike | undefined = globalThis.localStorage): KnowledgeGraph {
+  const validation = validateGraph({ ...graph, stateType: 'working', updatedAt: new Date().toISOString() });
   if (!validation.ok || !validation.graph) {
     throw new Error(validation.errors.map((error) => error.message).join(' '));
   }
 
   storage?.setItem(WORKING_GRAPH_STORAGE_KEY, JSON.stringify(validation.graph, null, 2));
   return validation.graph;
+}
+
+export function saveLayout(graph: KnowledgeGraph, positions: Record<string, GraphPosition>, storage: GraphStorageLike | undefined = globalThis.localStorage): KnowledgeGraph {
+  const nextGraph: KnowledgeGraph = {
+    ...graph,
+    stateType: 'working',
+    layout: Object.fromEntries(graph.nodes.map((node) => [
+      node.id,
+      requireFinitePosition(positions[node.id] ?? graph.layout?.[node.id] ?? { x: 0, y: 0 }, `Layout position for "${node.id}"`),
+    ])),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return saveGraph(nextGraph, storage);
 }

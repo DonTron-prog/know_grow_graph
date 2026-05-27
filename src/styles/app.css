@@ -33,6 +33,11 @@ button:disabled {
   opacity: 0.65;
 }
 
+button.active {
+  border-color: #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.28);
+}
+
 .workbench {
   display: flex;
   flex-direction: column;
