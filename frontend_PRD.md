@@ -1,325 +1,174 @@
-# Frontend PRD: Snapshot Multi-View Knowledge Graph Workbench
+# Frontend PRD: Incremental Sigma Knowledge Graph Workbench
 
 ## 1. Product Summary
 
-The frontend is a simple graph workbench for demonstrating LLM-directed knowledge graph transformation.
+The project remains a knowledge graph workbench, but the next major rewrite is intentionally narrower and more incremental.
 
-The centre of the interface is the knowledge graph visualization. The user inspects graph elements, gives Pi Coder natural-language directions, sees the graph change, and saves useful states as snapshots. Pi Coder can work through typed graph patches or, in local direct JSON mode, by editing the shared mutable graph JSON that the backend reloads and validates.
+The immediate goal is to prove that the graph can render well with Sigma (`sigma.js`) and that the layout/interaction model feels right. AI functionality, natural-language graph operations, lineage, branching, snapshots, and durable state history are not priorities for this phase.
 
-The first frontend does not need to look polished. It must be fast, legible, and clear enough to prove that Pi Coder can transform a graph according to human direction.
+## 2. Product Goal
 
-## 2. Frontend Goal
+Build in three phases:
 
-The frontend must make this loop visible:
+1. **Render and layout**: load graph data and render it with Sigma in the desired visual layout.
+2. **Manual operations**: add, delete, select, drag, and edit graph elements manually.
+3. **Agent integration**: add AI-assisted question answering and natural-language graph manipulation once the manual graph experience is proven.
 
-```text
-Human direction -> Pi Coder response -> graph operation -> updated visualization -> saved snapshot
-```
+The first success condition is simple: the graph renders clearly and can be inspected/manipulated at the current concept-graph scale.
 
-For the local containerized build, it must also make this direct JSON loop safe and visible:
+## 3. Phase 1: Sigma Render and Layout
 
-```text
-Human direction -> Pi edits working_graph.json -> backend reload/validation -> updated visualization -> saved snapshot
-```
-
-The graph should remain the main artifact. Chat is the control surface for LLM work. The inspector is the explanation surface for selected graph data.
-
-## 3. Layout
-
-The first frontend uses a three-panel layout with a top toolbar.
-
-```text
-┌────────────────────────────────────────────────────────────────────┐
-│ Undo | Redo | Add Node | Add Edge | Merge Selected | Snapshot ▼     │
-├──────────────────┬───────────────────────────────┬─────────────────┤
-│ Inspector         │ Knowledge Graph Visualization │ Pi Panel        │
-│                  │                               │ Chat | Actions  │
-│ selected node     │ nodes, edges, labels          │ Raw             │
-│ selected edge     │ zoom, pan, drag, select       │ scroll history  │
-│ properties        │                               │ prompt input    │
-└──────────────────┴───────────────────────────────┴─────────────────┘
-```
-
-### 3.1 Centre Panel: Knowledge Graph Visualization
-
-The centre panel is the primary interface.
+Phase 1 is the highest priority.
 
 Required capabilities:
 
-- display nodes and edges from the working graph
-- zoom and pan
-- drag nodes
+- use Sigma (`sigma.js`) as the graph renderer
+- load a working graph from the backend or a fixture
+- render nodes and edges without a page reload
+- show readable node labels at the initial concept-graph scale
+- support zoom and pan
+- support node click selection
+- support node hover affordances
+- support node dragging if feasible in the first Sigma pass; otherwise document it as the first Phase 2 task
+- use a deterministic initial layout when graph data has coordinates
+- compute a reasonable force/layout fallback when graph data has no coordinates
+- persist or round-trip node coordinates only if needed to verify layout; do not build complex history/state management
+
+Visual priorities:
+
+- legible labels
+- stable layout
+- clear selection state
+- clear hover state
+- simple edge styling
+- no polished design system required
+
+## 4. Phase 2: Manual Graph Operations
+
+After Sigma render/layout is validated, add manual operations incrementally.
+
+Required operations:
+
+- add node
+- add edge
+- delete selected node or edge
+- edit node label/type/notes
+- edit edge label/notes
+- drag/reposition nodes
 - select one node
 - select one edge
-- select multiple nodes
-- highlight selected elements
-- update immediately after user operations, Pi Coder patches, or validated Pi direct JSON edits
-- show readable labels at the 56-node concept graph scale
+- select multiple nodes if Sigma interaction work supports it cleanly
 
-Useful visual encodings:
+Nice-to-have operations after basics work:
 
-- source-derived nodes: neutral grey
-- human-created nodes: blue
-- LLM-created nodes: purple
-- selected nodes: yellow outline
-- recently added nodes or edges: green highlight
-- recently deleted items: listed in Actions, not necessarily rendered
+- merge selected nodes
+- split a node
+- bulk delete
+- layout reset
+- save current layout
 
-The graph should prioritize performance and legibility over visual beauty.
+For this phase, state can remain simple. Do not build lineage, branching, deterministic replay, or audit history.
 
-### 3.2 Left Panel: Inspector
+## 5. Phase 3: Agent and Natural Language Operations
 
-The left panel shows information about the current selection.
+Only after graph rendering and manual operations feel right, integrate AI.
+
+Target capabilities:
+
+- ask questions over the graph data
+- ask the agent to propose graph edits
+- apply validated agent edits to the graph
+- use natural language to add, delete, connect, merge, or reorganize graph elements
+- show a plain-language summary of what the agent changed
+
+The exact agent contract may shift as Phases 1 and 2 are built. Keep Phase 3 specs flexible.
+
+## 6. Layout
+
+Use a simple desktop workbench layout.
+
+```text
+┌────────────────────────────────────────────────────────────────────┐
+│ Toolbar: Load | Layout | Add Node | Add Edge | Delete | Save Layout │
+├──────────────────┬───────────────────────────────┬─────────────────┤
+│ Inspector         │ Sigma Graph Canvas            │ Agent Panel      │
+│ selected element  │ nodes, edges, labels          │ disabled/minimal │
+│ properties        │ zoom, pan, drag, select       │ until Phase 3    │
+└──────────────────┴───────────────────────────────┴─────────────────┘
+```
+
+For Phase 1, the right Agent Panel may be hidden, collapsed, or replaced by a debug panel.
+
+## 7. Inspector
+
+The inspector explains the current graph selection.
 
 For a selected node, show:
 
 - label
 - id
 - type
-- origin: source, human, LLM, imported, or unknown
 - notes
 - connected node count
 - connected edges
-- source references when available
 
 For a selected edge, show:
 
 - source node
 - relation label
 - target node
-- origin
 - notes
-- source references when available
 
-For multiple selected nodes, show:
+If nothing is selected, show:
 
-- count
-- labels
-- available bulk actions from the toolbar, especially Merge Selected
-
-If nothing is selected, show current graph state:
-
-- working graph name
+- graph name
 - node count
 - edge count
-- active snapshot, if any
-- unsaved changes indicator
+- layout status
 
-### 3.3 Right Panel: Pi Panel
+Editing can wait until Phase 2.
 
-The right panel exposes Pi Coder directly. It has three tabs.
+## 8. Backend Expectations
 
-#### Chat Tab
+The backend should be minimal during the Sigma-first rewrite.
 
-Shows the conversation with Pi Coder.
+Phase 1 backend needs only:
 
-Required capabilities:
+- health endpoint
+- get working graph endpoint
+- optional replace working graph endpoint if layout coordinates must be saved
+- fixture fallback so the frontend can render immediately
 
-- scrollable message history
-- prompt input
-- submit prompt
-- show Pi Coder response
-- show status: thinking, validating, applying/reloading, failed, completed
-- indicate whether the Pi operation used patch mode or direct JSON mode
+Phase 2 backend adds mutation endpoints or graph replacement for manual edits.
 
-The user may give natural-language instructions such as:
+Phase 3 backend adds agent endpoints.
 
-```text
-Reorganize this graph into teaching units for an introductory agentic AI workshop.
-```
+## 9. Non-Goals for the Rewrite Phase
 
-```text
-Add missing bridge concepts between evaluation and reliability.
-```
+Do not prioritize:
 
-```text
-Make the current organization more causal and less tool-centric.
-```
-
-#### Actions Tab
-
-Shows a human-readable summary of what Pi Coder proposed, applied, or changed through direct JSON editing.
-
-Example:
-
-```text
-Transformation: organize into teaching units
-
-Added nodes
-- Prompt Control Surface
-- Evaluation Harness
-
-Merged nodes
-- Prompt + Persona + Few-Shot -> Prompt Control Surface
-
-Added edges
-- Evaluation Harness -> supports -> Agent Reliability
-
-Deleted edges
-- Tool Use -> loosely_related_to -> Guardrails
-```
-
-The Actions tab is the default tab after each Pi Coder operation. It proves what the model did without forcing the user to read raw JSON.
-
-#### Raw Tab
-
-Shows the typed graph patch used by the application, or the direct JSON edit/reload details when direct mode is used.
-
-Raw display is for debugging and developer inspection. It is not the primary user experience.
-
-The Raw tab may show:
-
-- proposed patch
-- validation result
-- applied patch
-- direct JSON edit result
-- backend reload result
-- error messages
-
-## 4. Top Toolbar
-
-The top toolbar contains the only always-visible buttons.
-
-Required controls:
-
-- Undo
-- Redo
-- Add Node
-- Add Edge
-- Merge Selected
-- Split Selected
-- Delete Selected
-- Save Snapshot
-- Snapshot dropdown
-
-### 4.1 Snapshot Dropdown
-
-The snapshot dropdown should contain:
-
-- current working graph
-- saved snapshot list
-- Save current as snapshot
-- Load selected snapshot
-- Duplicate selected snapshot
-- Revert to source
-
-The source graph must be visually marked as read-only.
-
-## 5. Interaction Requirements
-
-### 5.1 Selection
-
-- Clicking a node selects it and updates the left inspector.
-- Clicking an edge selects it and updates the left inspector.
-- Shift-click or box-select selects multiple nodes.
-- Multi-select enables Merge Selected and Delete Selected.
-
-### 5.2 Direct Manipulation
-
-The user can manually:
-
-- add a node
-- add an edge
-- delete selected nodes or edges
-- merge selected nodes
-- split a selected node
-- edit labels, types, and notes from the inspector
-- drag nodes on the canvas
-
-### 5.3 Pi Coder Manipulation
-
-The user can ask Pi Coder to transform the working graph.
-
-Preferred/default mode: Pi Coder returns a typed graph patch internally. The frontend or backend validates the patch before applying it.
-
-Local direct JSON mode: the containerized Pi Coder has read/write access to the mutable graph JSON, edits `working_graph.json`, and the backend reloads and validates the result before the frontend accepts it.
-
-The user does not need to see raw JSON by default. The Actions tab should summarize the patch or direct JSON edit in plain language.
-
-### 5.4 Undo and Redo
-
-Undo and redo operate on user-applied graph changes, including Pi Coder-applied patches and validated Pi direct JSON edits.
-
-For the first PoC, undo and redo are frontend-owned. The frontend stores full working graph state snapshots in memory and restores them through the backend working graph replacement endpoint. The backend does not maintain undo/redo stacks or replay action history.
-
-## 6. Graph Patch Contract
-
-The frontend should treat Pi Coder output as a proposed graph patch in the preferred/default mode, not as arbitrary UI mutation. Direct JSON mode is an explicit local mode where Pi edits `working_graph.json`; the backend must reload and validate the full graph before the frontend updates state.
-
-Patch operations should include:
-
-- add_node
-- update_node
-- delete_node
-- add_edge
-- update_edge
-- delete_edge
-- merge_nodes
-- split_node
-
-Validation blocks only structural corruption:
-
-- duplicate node ids
-- duplicate edge ids
-- edges pointing to missing nodes
-- malformed operation fields
-- attempted source graph mutation
-
-Validation warns, but does not block, for:
-
-- new LLM-created nodes without source references
-- deleted source-derived nodes in the working graph
-- sparse or disconnected graph states
-- missing rationale
-
-## 7. Performance Requirements
-
-The frontend must handle the 56-node concept graph interactively.
-
-Target behaviour:
-
-- graph renders in under one second after load
-- common operations feel immediate at 56 nodes
-- Pi Coder operations may take longer, but the UI must show status
-- graph updates should not require a full page reload
-- backend reload after Pi direct JSON edits should feel like a normal graph update
-
-## 8. Non-Goals
-
-The first frontend will not include:
-
-- polished visual design
-- complex onboarding
-- audit-grade lineage graph
-- deterministic replay UI
-- side-by-side branch comparison
-- collaboration features
+- lineage tracking
+- branching
+- deterministic replay
+- snapshot history
+- audit-grade action logs
+- side-by-side comparison
+- collaboration
+- polished design system
 - mobile layout
-- advanced graph analytics
+- complex persistence
+- AI workflows before Sigma rendering is proven
 
-## 9. Frontend Success Metrics
+## 10. Success Metrics
 
-The frontend is successful when:
+Phase 1 succeeds when:
 
-1. The graph is clearly the centre of the product.
-2. Clicking graph elements updates the inspector correctly.
-3. Pi Coder can receive direction through the chat panel.
-4. Pi Coder actions visibly change the graph.
-5. Pi direct JSON edits visibly update the graph after backend validation.
-6. The Actions tab summarizes what changed.
-7. The Raw tab exposes the graph patch or direct JSON edit details for debugging.
-8. The user can save and reload snapshots.
-9. The user can revert to source.
+1. Sigma renders the graph reliably.
+2. The graph layout is legible and stable enough to evaluate.
+3. Zoom, pan, hover, and selection work.
+4. Labels are readable at the target graph scale.
+5. The implementation is simple enough to iterate on manual operations next.
 
-## 10. First Implementation Recommendation
+Phase 2 succeeds when manual add/delete/edit/reposition operations work.
 
-Use a practical stack:
-
-- React or Vite for the frontend
-- Cytoscape.js for the graph canvas
-- a simple local API for graph state and Pi Coder calls
-- JSON-file persistence under `.data/` first
-- a containerized Pi Coder service sharing the mutable graph-data directory with the backend
-- optional DuckDB-backed persistence later if needed
-
-Do not build a complex design system first. The priority is graph manipulation, Pi Coder integration, and reliable snapshot state.
+Phase 3 succeeds when the agent can answer questions and manipulate the graph through validated operations.

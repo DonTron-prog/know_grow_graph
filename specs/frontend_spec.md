@@ -1,482 +1,354 @@
-# Frontend Specification: Snapshot Multi-View Knowledge Graph Workbench
+# Frontend Specification: Sigma-First Knowledge Graph Workbench
 
 ## 1. Scope
 
-This specification defines the first frontend for the Snapshot Multi-View Knowledge Graph Workbench.
+This specification replaces the previous snapshot/Pi-first frontend plan with an incremental Sigma-first rewrite.
 
-The frontend is a proof-of-concept interface. It should demonstrate that Pi Coder can transform a knowledge graph from human direction while keeping the graph visualization central. Pi Coder may operate either by returning a typed patch or, in local direct JSON mode, by editing the shared mutable graph JSON that the backend then reloads and validates.
+The immediate objective is to render the graph with Sigma (`sigma.js`) and validate the desired layout and interaction model. Manual graph operations come next. Agent functionality comes last.
 
-## 2. Screen Structure
+## 2. Phases
 
-The application has one primary screen.
+### Phase 1: Render and Layout
+
+Primary goal: get Sigma rendering the graph clearly.
+
+Required:
+
+- use Sigma as the graph renderer
+- use Graphology or Sigma-compatible graph data internally
+- load the working graph from the backend or a local fixture
+- render nodes and edges
+- render readable node labels
+- support zoom and pan
+- support node hover
+- support click selection for nodes
+- support click selection for edges if practical with Sigma event handling
+- display selected element details in the inspector
+- compute an initial layout when coordinates are missing
+- preserve coordinates from graph data when available
+- expose a layout reset/recompute control
+
+Acceptance for Phase 1:
+
+- the graph renders without code changes to the data
+- the layout is stable enough to review visually
+- selection updates the inspector
+- labels are readable at the current concept-graph scale
+- no AI, snapshot, lineage, or branching functionality is required
+
+### Phase 2: Manual Operations
+
+Primary goal: manipulate the graph directly.
+
+Required:
+
+- add node
+- add edge
+- delete selected node or edge
+- edit node label/type/notes
+- edit edge label/notes
+- drag/reposition nodes
+- save layout coordinates if needed
+
+Optional after basics:
+
+- multi-select nodes
+- merge selected nodes
+- split node
+- bulk delete
+- duplicate node
+
+Acceptance for Phase 2:
+
+- the user can manually create, edit, connect, move, and delete graph elements
+- graph changes immediately re-render in Sigma
+- invalid graph states are blocked or recovered without corrupting the displayed graph
+
+### Phase 3: Agent Integration
+
+Primary goal: ask questions over the graph and manipulate it with natural language.
+
+Target capabilities:
+
+- send graph context and a user instruction to the agent
+- ask questions over the current graph
+- ask the agent to propose graph operations
+- validate proposed operations before applying them
+- apply valid operations to the graph
+- show a plain-language summary of agent changes
+
+Phase 3 contracts are expected to shift as Phases 1 and 2 reveal what graph operations are actually needed.
+
+## 3. Screen Structure
+
+Desktop-first layout:
 
 ```text
 AppShell
 ├── TopToolbar
 ├── MainGrid
 │   ├── InspectorPanel
-│   ├── GraphCanvas
-│   └── PiPanel
+│   ├── SigmaGraphCanvas
+│   └── SidePanel
 └── StatusBar
 ```
 
-Recommended proportions on desktop:
+Recommended proportions:
 
 - InspectorPanel: 20 percent width
-- GraphCanvas: 55 percent width
-- PiPanel: 25 percent width
-- TopToolbar: fixed height
-- StatusBar: compact fixed height
+- SigmaGraphCanvas: 60 percent width
+- SidePanel: 20 percent width, optional/collapsible in Phase 1
 
-The first prototype targets desktop only.
+The graph canvas is always the center of the product.
 
-## 3. Components
+## 4. TopToolbar
 
-### 3.1 TopToolbar
-
-Required controls:
+Phase 1 controls:
 
 | Control | Enabled When | Behaviour |
 |---|---|---|
-| Undo | undo stack not empty | restores previous working graph state |
-| Redo | redo stack not empty | reapplies next working graph state |
-| Add Node | always | opens minimal node creation form |
-| Add Edge | one or two nodes selected | opens minimal edge creation form |
-| Merge Selected | two or more nodes selected | opens merge confirmation or delegates to Pi Coder |
-| Split Selected | one node selected | opens split form or delegates to Pi Coder |
-| Delete Selected | node or edge selected | deletes from working graph after confirmation |
-| Save Snapshot | working graph loaded | saves named snapshot |
-| Snapshot dropdown | always | lists snapshots and source revert action |
+| Load Graph | always | reloads current working graph |
+| Reset Layout | graph loaded | recomputes layout |
+| Save Layout | graph loaded and layout persistence available | persists node coordinates |
+| Fit View | graph loaded | fits graph to viewport |
 
-No extra primary buttons should be added for the first prototype.
+Phase 2 controls:
 
-### 3.2 GraphCanvas
+| Control | Enabled When | Behaviour |
+|---|---|---|
+| Add Node | graph loaded | opens minimal node creation form |
+| Add Edge | graph loaded, preferably node selected | opens minimal edge creation form |
+| Delete Selected | node or edge selected | deletes selected graph elements after confirmation |
+| Merge Selected | multiple nodes selected | optional after multi-select works |
 
-Recommended dependency: Cytoscape.js.
+Phase 3 controls should not be added to the top toolbar unless they are core graph actions. Agent controls belong in the SidePanel.
 
-Required behaviours:
+## 5. SigmaGraphCanvas
 
-- render working graph nodes and edges
-- zoom and pan
-- drag nodes
-- click-select node
-- click-select edge
-- multi-select nodes
-- clear selection by clicking background
-- emit selection events to InspectorPanel
-- accept graph updates from direct manipulation, Pi Coder patches, and validated Pi direct JSON edits
-- highlight recently changed elements
+Implementation requirements:
 
-Required node fields:
+- render using Sigma (`sigma.js`)
+- maintain a Graphology graph or equivalent Sigma-compatible graph model
+- map API graph nodes/edges into renderer attributes
+- update Sigma when graph data changes
+- avoid full page reloads for graph updates
+- cleanly destroy/recreate Sigma instances when component lifecycle requires it
+
+Required node fields at the app boundary:
 
 ```ts
 type GraphNode = {
   id: string;
   label: string;
-  type: string;
-  origin: 'source' | 'human' | 'llm' | 'imported' | 'unknown';
+  type?: string;
+  origin?: 'source' | 'human' | 'llm' | 'imported' | 'unknown';
   notes?: string;
-  sourceNodeIds?: string[];
+  x?: number;
+  y?: number;
+  size?: number;
+  color?: string;
   properties?: Record<string, unknown>;
 };
 ```
 
-Required edge fields:
+Required edge fields at the app boundary:
 
 ```ts
 type GraphEdge = {
   id: string;
   source: string;
   target: string;
-  label: string;
-  origin: 'source' | 'human' | 'llm' | 'imported' | 'unknown';
+  label?: string;
+  origin?: 'source' | 'human' | 'llm' | 'imported' | 'unknown';
   notes?: string;
-  sourceEdgeIds?: string[];
+  size?: number;
+  color?: string;
   properties?: Record<string, unknown>;
+};
+```
+
+Graph state:
+
+```ts
+type GraphState = {
+  graphId: string;
+  name: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  layout?: Record<string, { x: number; y: number }>;
+  updatedAt?: string;
 };
 ```
 
 Visual defaults:
 
-- source nodes: grey
-- human nodes: blue
-- LLM nodes: purple
-- selected nodes: yellow outline
-- recently added: green pulse or border
-- warning state: orange outline
-- invalid state: red outline
+- source/unknown nodes: grey
+- human-created nodes: blue
+- LLM-created nodes: purple, used later
+- selected node/edge: yellow highlight
+- hovered node/edge: brighter outline or color
+- recently changed: green highlight, Phase 2+
 
-Performance rule: use simple styling first. Avoid expensive animations until the 56-node graph is smooth.
+Layout:
 
-### 3.3 InspectorPanel
+- if `layout` or node `x/y` exists, use those coordinates
+- otherwise run a simple layout suitable for the current graph size
+- provide a way to reset/recompute layout
+- prioritize stability and readability over visual beauty
 
-The inspector is read/write for working graph elements and read-only for source graph elements.
+## 6. InspectorPanel
 
-States:
+Phase 1 read-only inspector states:
 
 1. No selection
 2. Single node selected
 3. Single edge selected
-4. Multiple nodes selected
-5. Invalid or deleted selection
+4. Invalid/deleted selection
 
 No selection view:
 
 - graph name
-- graph state: source, working, or snapshot
 - node count
 - edge count
-- active snapshot name
-- unsaved changes flag
+- layout status
 
 Node view:
 
-- label input
-- id read-only
-- type input or dropdown
-- origin read-only
-- notes textarea
-- source refs list when available
-- connected edges list
+- label
+- id
+- type
+- notes
+- connected edge count
+- connected nodes if easy to compute
 
 Edge view:
 
-- source node read-only link
-- relation label input
-- target node read-only link
-- origin read-only
-- notes textarea
-- source refs list when available
+- source node
+- relation label
+- target node
+- notes
 
-Multi-select view:
+Phase 2 makes supported fields editable.
 
-- selected node count
-- selected labels
-- merge eligibility
-- delete eligibility
+## 7. SidePanel
 
-Inspector edits create working graph updates and push prior state to undo stack.
+Phase 1:
 
-### 3.4 PiPanel
+- may be hidden, collapsed, or used for graph/debug information
+- must not distract from Sigma rendering work
 
-The Pi Panel has three tabs: Chat, Actions, Raw.
+Phase 2:
 
-#### Chat Tab
+- may contain forms for add/edit operations if not handled in dialogs
 
-Required elements:
+Phase 3:
 
-- scrollable conversation history
-- user prompt input
-- submit on Enter or send control
-- status display: idle, thinking, validating, applying/reloading, failed, complete
+- contains agent chat/question input
+- contains proposed operation summary
+- contains raw/debug agent output if useful
 
-The Chat tab sends the current graph context and user instruction to Pi Coder. It may use patch mode or direct JSON mode. If a mode control is exposed, keep it inside the Pi Panel rather than adding another top toolbar primary action.
+## 8. State Management
 
-Minimal prompt context should include:
-
-- selected nodes and edges
-- visible working graph node cards
-- visible working graph edge cards
-- current snapshot name
-- user instruction
-
-#### Actions Tab
-
-The Actions tab displays the human-readable result of the most recent Pi Coder proposal, applied patch, or validated direct JSON edit.
-
-Action summary model:
-
-```ts
-type ActionSummary = {
-  title: string;
-  instruction: string;
-  addedNodes: string[];
-  updatedNodes: string[];
-  deletedNodes: string[];
-  addedEdges: string[];
-  updatedEdges: string[];
-  deletedEdges: string[];
-  mergedNodes: string[];
-  splitNodes: string[];
-  warnings: string[];
-};
-```
-
-The Actions tab becomes active after Pi Coder returns a patch or after a patch is applied.
-
-#### Raw Tab
-
-The Raw tab displays developer details:
-
-- raw Pi Coder response
-- parsed graph patch
-- direct JSON edit/reload result when direct mode is used
-- validation results
-- application result
-- error stack or error message when available
-
-Raw is for debugging. It should not be the default user view.
-
-## 4. Graph Patch Contract
-
-Pi Coder should return a typed patch in the preferred/default mode. The frontend or backend validates it before applying it. In local direct JSON mode, Pi may instead edit the shared `working_graph.json` file; the backend must reload and validate that full graph before the frontend accepts it.
-
-### 4.1 Patch Shape
-
-```ts
-type GraphPatch = {
-  patchId: string;
-  instruction: string;
-  summary: string;
-  operations: GraphPatchOperation[];
-};
-```
-
-### 4.2 Operations
-
-```ts
-type GraphPatchOperation =
-  | AddNodeOp
-  | UpdateNodeOp
-  | DeleteNodeOp
-  | AddEdgeOp
-  | UpdateEdgeOp
-  | DeleteEdgeOp
-  | MergeNodesOp
-  | SplitNodeOp;
-```
-
-```ts
-type AddNodeOp = {
-  op: 'add_node';
-  id: string;
-  label: string;
-  nodeType: string;
-  origin: 'llm' | 'human';
-  notes?: string;
-  sourceNodeIds?: string[];
-};
-```
-
-```ts
-type AddEdgeOp = {
-  op: 'add_edge';
-  id: string;
-  source: string;
-  target: string;
-  label: string;
-  origin: 'llm' | 'human';
-  notes?: string;
-  sourceEdgeIds?: string[];
-};
-```
-
-```ts
-type MergeNodesOp = {
-  op: 'merge_nodes';
-  inputNodeIds: string[];
-  outputNode: GraphNode;
-  replacementEdges?: GraphEdge[];
-  deleteInputNodes: boolean;
-};
-```
-
-```ts
-type SplitNodeOp = {
-  op: 'split_node';
-  inputNodeId: string;
-  outputNodes: GraphNode[];
-  replacementEdges?: GraphEdge[];
-  deleteInputNode: boolean;
-};
-```
-
-Update and delete operations should use existing ids and minimal changed fields.
-
-### 4.3 Validation
-
-Blockers:
-
-- malformed patch
-- duplicate node id
-- duplicate edge id
-- edge references missing node
-- delete operation references missing element
-- update operation references missing element
-- patch attempts to mutate source graph instead of working graph
-
-Warnings:
-
-- LLM-created node has no source refs
-- patch deletes many nodes
-- patch creates disconnected components
-- patch removes many source-derived edges
-- operation has no notes or rationale
-
-Warnings should be displayed in Actions and Raw. Warnings should not block exploratory work.
-
-## 5. State Management
-
-Frontend state:
+Keep state simple.
 
 ```ts
 type AppState = {
-  sourceGraphMeta: GraphMeta;
-  workingGraph: GraphState;
+  workingGraph?: GraphState;
   selectedNodeIds: string[];
   selectedEdgeIds: string[];
-  snapshots: SnapshotMeta[];
-  activeSnapshotId?: string;
-  undoStack: GraphState[];
-  redoStack: GraphState[];
-  piMessages: PiMessage[];
-  lastPatch?: GraphPatch;
-  lastPiMode?: 'patch' | 'direct_json';
-  lastActionSummary?: ActionSummary;
-  validationResults?: ValidationResult[];
+  hoveredNodeId?: string;
+  hoveredEdgeId?: string;
+  layoutDirty: boolean;
+  status: 'idle' | 'loading' | 'rendering' | 'saving' | 'error';
+  error?: string;
 };
 ```
 
-Undo and redo store whole working graph states for the first prototype. This is acceptable for the 56-node concept graph.
+Phase 2 may add a lightweight undo stack if it helps manual editing, but lineage, branching, replay, and snapshot history are explicitly out of scope for now.
 
-### 5.1 State Ownership
+## 9. Manual Operation Contract
 
-For the first PoC, undo and redo are frontend-owned.
+Phase 2 operations can be implemented as either individual endpoints or full graph replacement. Keep the contract small.
 
-Rules:
+Minimum operation names if using patches:
 
-- The frontend owns `AppState`, including `undoStack` and `redoStack`.
-- The backend persists only the latest valid working graph, source graph, and snapshots.
-- Before any user-applied mutation, the frontend pushes the current `workingGraph` onto `undoStack` and clears `redoStack`.
-- A mutation may be a toolbar operation, inspector edit, snapshot load, source revert, applied Pi Coder patch, or validated Pi direct JSON edit.
-- The frontend sends mutations to the backend as `GraphPatch` operations when possible.
-- For direct JSON mode, the frontend pushes the prior graph to `undoStack` before invoking Pi, then accepts only the backend-reloaded validated `GraphState`.
-- The backend validates, applies or reloads, persists, and returns the updated `GraphState`.
-- Undo pops a previous `GraphState` from `undoStack`, pushes the current graph onto `redoStack`, and replaces the backend working graph with that previous state.
-- Redo does the reverse.
-- Undo and redo must not require backend action replay.
+- `add_node`
+- `update_node`
+- `delete_node`
+- `add_edge`
+- `update_edge`
+- `delete_edge`
 
-## 6. Snapshot Behaviour
+Optional later:
 
-Snapshot dropdown actions:
+- `merge_nodes`
+- `split_node`
 
-- Save current as snapshot
-- Load snapshot
-- Duplicate snapshot
-- Revert to source
+Validation blockers:
 
-Save snapshot stores:
+- duplicate node id
+- duplicate edge id
+- edge references missing node
+- update/delete references missing element
+- malformed operation
 
-- nodes
-- edges
-- layout metadata
-- snapshot name
-- notes, optional
-- created timestamp
+## 10. Agent Integration Placeholder
 
-Loading a snapshot replaces the working graph and pushes the previous state to undo stack.
+Do not implement agent workflows until Phase 3.
 
-Revert to source replaces the working graph with a fresh copy of the immutable source graph.
+Expected future flow:
 
-## 7. Pi Coder Integration
-
-The frontend should call the backend Pi Coder endpoint with:
-
-```ts
-type PiEditMode = 'patch' | 'direct_json';
-
-type PiCoderRequest = {
-  instruction: string;
-  selectedNodeIds: string[];
-  selectedEdgeIds: string[];
-  graph: {
-    nodes: GraphNode[];
-    edges: GraphEdge[];
-  };
-  snapshot?: SnapshotMeta;
-  mode?: PiEditMode; // default: 'patch'
-};
+```text
+User instruction -> backend agent endpoint -> proposed graph operation(s) -> validation -> apply -> Sigma re-render
 ```
 
-Expected response:
+The eventual agent should be able to:
 
-```ts
-type PiCoderResponse = {
-  message: string;
-  mode: PiEditMode;
-  patch?: GraphPatch;
-  graph?: GraphState; // returned after successful direct_json edit
-  snapshots?: SnapshotMeta[]; // returned if snapshot metadata changed
-  actionSummary?: ActionSummary;
-  warnings?: string[];
-  validationResults?: ValidationResult[];
-  changedElementIds?: string[];
-  rawPiOutput?: unknown;
-};
+- answer questions about graph data
+- propose additions/deletions/edits
+- manipulate graph structure through validated operations
+
+## 11. Error Handling
+
+Errors should appear in the StatusBar and, when helpful, the SidePanel.
+
+Common Phase 1 errors:
+
+- graph load failed
+- graph data malformed
+- Sigma render failed
+- layout computation failed
+
+The graph should remain in the last valid renderable state.
+
+## 12. StatusBar
+
+Phase 1 status bar:
+
+```text
+56 nodes | 84 edges | 1 selected | layout saved | idle
 ```
 
-If Pi Coder returns plain text without a patch in patch mode, the Chat tab displays it but the graph is not mutated.
-
-If direct JSON mode succeeds, the backend returns the reloaded validated `GraphState`; the frontend replaces `workingGraph`, updates snapshot metadata if returned, records changed element IDs, and refreshes the canvas. If direct JSON validation fails, the frontend keeps the last valid graph and displays the backend error in Raw and StatusBar.
-
-## 8. Error Handling
-
-Common errors:
-
-- Pi Coder timeout
-- invalid JSON patch
-- patch validation failure
-- invalid direct JSON edit from Pi
-- stale graph reload after direct file edit
-- save snapshot failure
-- load snapshot failure
-- graph render failure
-
-Errors should appear in the Pi Panel Raw tab and in the StatusBar. The graph should remain in the last valid state.
-
-## 9. StatusBar
-
-The StatusBar should show compact runtime state:
+Show:
 
 - node count
 - edge count
 - selected count
-- active snapshot
-- unsaved changes
-- Pi status
+- layout dirty/saved state
+- runtime status
 
-Example:
+## 13. Implementation Order
 
-```text
-56 nodes | 84 edges | 3 selected | working graph | unsaved | Pi idle
-```
-
-## 10. Implementation Order
-
-1. Render static working graph in GraphCanvas.
-2. Add selection and InspectorPanel.
-3. Add top toolbar direct operations.
-4. Add undo/redo using full graph state snapshots.
-5. Add save/load/revert snapshots.
-6. Add PiPanel Chat with mocked Pi Coder response.
-7. Add GraphPatch validation.
-8. Apply Pi Coder graph patches to the working graph.
-9. Add direct JSON mode handling for backend-reloaded Pi edits.
-10. Add Actions and Raw tabs.
-11. Add visual highlights for recent changes.
-
-## 11. Acceptance Criteria
-
-The frontend is acceptable when:
-
-- the graph loads and remains central
-- clicking nodes and edges updates the inspector
-- direct add, delete, merge, and edit operations work
-- snapshots save and reload
-- revert to source works
-- Pi Coder can return a typed patch
-- valid Pi Coder patches update the graph
-- Pi direct JSON edits can update the graph after backend reload/validation
-- invalid patches or invalid direct JSON edits do not corrupt graph state
-- Actions summarizes Pi Coder changes
-- Raw exposes patch, direct edit, and validation details
+1. Install and wire Sigma/Graphology dependencies.
+2. Define shared graph types.
+3. Load a fixture or backend working graph.
+4. Render nodes and edges with Sigma.
+5. Add layout fallback for missing coordinates.
+6. Add zoom/pan/fit controls.
+7. Add hover and click node selection.
+8. Add inspector updates from selection.
+9. Add edge selection if practical.
+10. Add drag/reposition support.
+11. Add save/reset layout.
+12. Begin Phase 2 manual add/delete/edit operations.
+13. Begin Phase 3 agent integration only after manual operations are usable.
