@@ -65,6 +65,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - [x] Implement Phase 2 manual graph operations behind an explicit editing affordance.
   - Added renderer-neutral validated mutations for add concept, add relationship, edit concept/relationship fields, delete selected concept/relationship, and layout/reposition updates.
   - Added explicit content editing mode so review mode remains safe by default; drag repositioning is active only while content editing is enabled.
+  - Resolved screenshot issue: review-mode content action buttons are no longer disabled/gray; clicking them explains that content editing must be enabled, and edit/delete without a selection now shows actionable messages.
   - Accepted manual changes persist to the existing working graph localStorage path.
   - Acceptance met in automated coverage: valid changes update graph/storage; invalid changes leave the previous valid graph unchanged.
 
@@ -91,14 +92,14 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, and invalid/recoverable layout cases are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
-- [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; recoverable errors keep graph review usable.
+- [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; review-mode content actions explain how to enable editing; recoverable errors keep graph review usable.
 - [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
 - [ ] Phase 3 tests later: agent answers are non-mutating; proposed edits are previewed, validated, applied/rejected safely, and summarized.
 
 ## Open decisions
 
 - Manual smoke findings: confirm desktop edit-mode flow, drag behavior, selection states, and localStorage round trips in the browser.
-- Better forms/warning surface: replace prompt-first editing and basic alerts with clearer forms, validation messages, and recoverable-warning presentation.
+- Better forms/warning surface: replace prompt-first editing and basic alerts with clearer forms and warning presentation.
 - Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
 
 ## Decisions recorded

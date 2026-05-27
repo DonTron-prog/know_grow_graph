@@ -78,11 +78,11 @@ function renderShell(): void {
         <button type="button" data-action="fit">Fit</button>
         <button type="button" data-action="reset-layout">Reset layout</button>
         <button type="button" data-action="save-layout" ${state.saving ? 'disabled' : ''}>${state.saving ? 'Saving…' : 'Save layout'}</button>
-        <button type="button" data-action="toggle-edit-mode" class="${state.editMode ? 'active' : ''}">${state.editMode ? 'Content editing active' : 'Enable content editing'}</button>
-        <button type="button" data-action="add-concept" ${state.editMode ? '' : 'disabled'}>Add concept</button>
-        <button type="button" data-action="add-relationship" ${state.editMode ? '' : 'disabled'}>Add relationship</button>
-        <button type="button" data-action="edit-selected" ${state.editMode && state.selectedId ? '' : 'disabled'}>Edit selected</button>
-        <button type="button" data-action="delete-selected" ${state.editMode && state.selectedId ? '' : 'disabled'}>Delete selected</button>
+        <button type="button" data-action="toggle-edit-mode" class="${state.editMode ? 'active' : ''}">${state.editMode ? 'Content editing active' : 'Turn on content editing'}</button>
+        <button type="button" data-action="add-concept">Add concept</button>
+        <button type="button" data-action="add-relationship">Add relationship</button>
+        <button type="button" data-action="edit-selected">Edit selected</button>
+        <button type="button" data-action="delete-selected">Delete selected</button>
       </header>
       <section class="status-strip" aria-live="polite">
         <span>${state.loading ? 'Loading graph…' : `${state.graph.nodes.length} concepts`}</span>
@@ -386,7 +386,13 @@ function addRelationshipFromPrompt(): void {
 }
 
 function editSelectedFromPrompt(): void {
-  if (!ensureEditing() || !state.selectedId || !state.selectedKind) return;
+  if (!ensureEditing()) return;
+  if (!state.selectedId || !state.selectedKind) {
+    state.error = 'Select a concept or relationship before editing.';
+    renderShell();
+    mountGraph();
+    return;
+  }
 
   if (state.selectedKind === 'concept') {
     const concept = state.graph.nodes.find((node) => node.id === state.selectedId);
@@ -419,7 +425,13 @@ function editSelectedFromPrompt(): void {
 }
 
 function deleteSelectedFromPrompt(): void {
-  if (!ensureEditing() || !state.selectedId || !state.selectedKind) return;
+  if (!ensureEditing()) return;
+  if (!state.selectedId || !state.selectedKind) {
+    state.error = 'Select a concept or relationship before deleting.';
+    renderShell();
+    mountGraph();
+    return;
+  }
   const selectedId = state.selectedId;
   const selectedKind = state.selectedKind;
   const connectedCount = selectedKind === 'concept' ? connectedEdges(state.graph, selectedId).length : 0;
