@@ -90,7 +90,8 @@ button.active {
 }
 
 .message,
-.error {
+.error,
+.warning {
   margin: 0;
   padding: 0.6rem 1rem;
 }
@@ -98,6 +99,19 @@ button.active {
 .message {
   background: #ecfdf5;
   color: #166534;
+}
+
+.warning {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.warning ul {
+  margin: 0.35rem 0;
+}
+
+.warning p {
+  margin: 0.25rem 0 0;
 }
 
 .error {

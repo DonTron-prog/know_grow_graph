@@ -5,6 +5,7 @@ import { toCytoscapeElements } from './graph/cytoscapeAdapter';
 import { connectedEdges, relationshipCounts } from './graph/metrics';
 import { createConcept, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from './graph/mutations';
 import { loadGraph, saveGraph, saveLayout } from './graph/storage';
+import { validateGraph } from './graph/validation';
 import type { GraphMutationResult } from './graph/mutations';
 import type { GraphPosition, KnowledgeGraph } from './graph/types';
 
@@ -17,6 +18,7 @@ interface AppState {
   loading: boolean;
   saving: boolean;
   editMode: boolean;
+  warnings: string[];
   message?: string;
   error?: string;
 }
@@ -38,6 +40,7 @@ let state: AppState = {
   loading: false,
   saving: false,
   editMode: false,
+  warnings: validationWarnings(initialLoad.validation),
 };
 let cy: Core | undefined;
 
@@ -56,6 +59,7 @@ function loadIntoState(): void {
       loading: false,
       saving: false,
       editMode: state.editMode,
+      warnings: recoveredFromInvalidSavedGraph ? [] : validationWarnings(result.validation),
       message: result.recoveryMessage ?? `Loaded ${result.source === 'working' ? 'saved working graph' : 'example Agentic AI graph'}.`,
       error: result.validation.errors.length > 0 ? result.validation.errors.map((error) => error.message).join(' ') : undefined,
     };
@@ -91,9 +95,11 @@ function renderShell(): void {
         <span>Layout ${state.layoutStatus}</span>
         <span>Source: ${state.source}</span>
         <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>
+        ${state.warnings.length > 0 ? `<span>${state.warnings.length} warning${state.warnings.length === 1 ? '' : 's'}</span>` : ''}
       </section>
       ${state.message ? `<p class="message">${escapeHtml(state.message)}</p>` : ''}
-      ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)} <button type="button" data-action="reload">Retry</button></p>` : ''}
+      ${renderWarnings()}
+      ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)} Continue reviewing the visible graph, or retry loading. <button type="button" data-action="reload">Retry</button></p>` : ''}
       <section class="workspace">
         <aside class="inspector" aria-label="Graph inspector">${renderInspector()}</aside>
         <div class="graph-panel">
@@ -176,7 +182,8 @@ function updateStatusStrip(): void {
     <span>${state.selectedId ? '1 selected' : '0 selected'}</span>
     <span>Layout ${state.layoutStatus}</span>
     <span>Source: ${state.source}</span>
-    <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>`;
+    <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>
+    ${state.warnings.length > 0 ? `<span>${state.warnings.length} warning${state.warnings.length === 1 ? '' : 's'}</span>` : ''}`;
 }
 
 function mountGraph(): void {
@@ -349,6 +356,7 @@ function applyMutation(message: string, mutation: () => GraphMutationResult, sel
     state.layoutStatus = 'saved';
     state.message = message;
     state.error = undefined;
+    state.warnings = graphWarnings(savedGraph);
     state.selectedKind = selectKind;
     state.selectedId = selectKind ? result.changedId : undefined;
     renderShell();
@@ -471,6 +479,7 @@ function saveCurrentLayout(): void {
     state.layoutStatus = 'saved';
     state.message = 'Layout saved in this browser.';
     state.error = undefined;
+    state.warnings = graphWarnings(state.graph);
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'Layout save failed.';
   } finally {
@@ -478,6 +487,30 @@ function saveCurrentLayout(): void {
     renderShell();
     mountGraph();
   }
+}
+
+function validationWarnings(validation: { warnings: Array<{ message: string }> }): string[] {
+  return validation.warnings.map((warning) => warning.message);
+}
+
+function graphWarnings(graph: KnowledgeGraph): string[] {
+  return validationWarnings(validateGraph(graph));
+}
+
+function renderWarnings(): string {
+  if (state.warnings.length === 0) return '';
+
+  const visibleWarnings = state.warnings.slice(0, 3);
+  const hiddenCount = state.warnings.length - visibleWarnings.length;
+  return `
+    <section class="warning" role="status" aria-label="Recoverable graph warnings">
+      <strong>Recoverable graph warning${state.warnings.length === 1 ? '' : 's'}</strong>
+      <ul>
+        ${visibleWarnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}
+        ${hiddenCount > 0 ? `<li>${hiddenCount} more warning${hiddenCount === 1 ? '' : 's'} hidden to keep review focused.</li>` : ''}
+      </ul>
+      <p>The graph remains available; continue reviewing or save a corrected working graph.</p>
+    </section>`;
 }
 
 function escapeHtml(value: string): string {

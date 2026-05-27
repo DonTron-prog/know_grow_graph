@@ -7,8 +7,8 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: behavioral specs `specs/01-graph-availability.md` through `specs/16-scope-boundaries.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`.
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, and saved positions.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
-- Present: validation commands are known passing for the current increment: `pnpm test` (4 files, 22 tests) and `pnpm build`.
-- Current implementation increment: Phase 2 manual graph operations and validity protection have landed; remaining near-term work is polish and manual smoke.
+- Present: validation commands are known passing for the current increment: `pnpm test` (4 files, 24 tests) and `pnpm build`.
+- Present: non-blocking recoverable graph warnings for layout/origin issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
 - Present in `src/app.ts`: Phase 1 selection, inspector, fit/reset layout, and explicit save-layout controls plus explicit content editing mode, prompt-driven add concept/add relationship/edit selected/delete selected with confirmation, edit-gated drag repositioning, and accepted mutation persistence to the localStorage working graph.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
@@ -50,11 +50,11 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - [ ] Partially completed: implement Phase 1 graph visualization, layout, and navigation.
   - Completed baseline rendering of concepts and relationships with labels, saved coordinates, simple styling, and Cytoscape navigation affordances.
   - Completed initial fit/reset-style navigation hooks sufficient for current workbench evaluation.
-  - Remaining: polish layout fallback behavior and interaction details after more manual smoke testing at desktop size.
+  - Remaining: polish interaction details after more manual smoke testing at desktop size.
 
 - [ ] Partially completed: implement Phase 1 focus, inspector, and activity feedback.
   - Completed baseline concept/relationship inspection, graph summary/count feedback, selection feedback, and user-actionable load/recovery messaging.
-  - Completed initial activity/status surface for loading/saving/layout state.
+  - Completed activity/status surface for loading, saving, layout state, and recoverable validation warnings.
   - Remaining: refine invalid/unavailable selection states and any relationship-selection edge cases found during manual smoke testing.
 
 - [ ] Partially completed: add Phase 1 layout saving only after rendering/layout are stable.
@@ -70,8 +70,8 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Acceptance met in automated coverage: valid changes update graph/storage; invalid changes leave the previous valid graph unchanged.
 
 - [ ] Partially completed: extend validity protection across all graph changes.
-  - Completed for loaded graphs, manual mutations, generic `saveGraph`, and `saveLayout` finite-coordinate rejection.
-  - Remaining: improve warning/error surface for recoverable issues and carry the same checks into future imported or agent-proposed changes.
+  - Completed for loaded graphs, manual mutations, generic `saveGraph`, `saveLayout` finite-coordinate rejection, recoverable layout/origin warning surfacing, and fallback-position confidence coverage.
+  - Remaining: carry the same checks into future imported or agent-proposed changes.
   - Acceptance for current manual mutations: every accepted mutation goes through validation and the displayed graph remains valid.
 
 - [ ] Implement Phase 3 agent questions only after graph review and manual operations are dependable.
@@ -87,9 +87,9 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: `pnpm test` passes with 4 files / 22 tests; `pnpm build` passes.
+  - Current handoff validation: `pnpm test` passes with 4 files / 24 tests; `pnpm build` passes.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
-- [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, and invalid/recoverable layout cases are covered for the initial validation layer.
+- [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
 - [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; review-mode content actions explain how to enable editing; recoverable errors keep graph review usable.
@@ -99,7 +99,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Open decisions
 
 - Manual smoke findings: confirm desktop edit-mode flow, drag behavior, selection states, and localStorage round trips in the browser.
-- Better forms/warning surface: replace prompt-first editing and basic alerts with clearer forms and warning presentation.
+- Better forms/status surface: replace prompt-first editing and basic alerts with clearer forms and more polished status presentation.
 - Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
 
 ## Decisions recorded

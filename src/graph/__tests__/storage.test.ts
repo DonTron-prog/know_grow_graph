@@ -45,6 +45,19 @@ describe('graph storage', () => {
     expect(result.recoveryMessage).toContain('bundled example graph is still visible');
   });
 
+  it('keeps recoverable warnings visible when loading a valid working graph', () => {
+    const storage = new MemoryStorage();
+    const missingOnePosition = structuredClone(fixtureGraph);
+    const layoutWithoutPrompting = Object.fromEntries(Object.entries(missingOnePosition.layout).filter(([nodeId]) => nodeId !== 'prompting'));
+    storage.setItem(WORKING_GRAPH_STORAGE_KEY, JSON.stringify({ ...missingOnePosition, layout: layoutWithoutPrompting, stateType: 'working' }));
+
+    const result = loadGraph(storage);
+
+    expect(result.source).toBe('working');
+    expect(result.validation.ok).toBe(true);
+    expect(result.validation.warnings.map((warning) => warning.code)).toContain('layout_position_missing');
+  });
+
   it('saves layout as a validated working graph', () => {
     const storage = new MemoryStorage();
     const saved = saveLayout(

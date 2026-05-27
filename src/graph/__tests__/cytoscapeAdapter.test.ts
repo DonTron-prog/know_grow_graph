@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fixtureGraph from '../../../fixtures/source_graph.example.json';
-import { toCytoscapeElements } from '../cytoscapeAdapter';
+import { graphPositions, toCytoscapeElements } from '../cytoscapeAdapter';
 import { requireValidGraph } from '../validation';
 
 describe('toCytoscapeElements', () => {
@@ -47,5 +47,20 @@ describe('toCytoscapeElements', () => {
 
     expect(agentLoop?.data.relationshipCount).toBe(4);
     expect(agentLoop?.classes).toContain('degree-4');
+  });
+
+  it('uses coherent fallback positions for concepts without saved layout entries', () => {
+    const graphWithoutSomeLayout = requireValidGraph({
+      ...fixtureGraph,
+      layout: { prompting: fixtureGraph.layout.prompting },
+    });
+
+    const positions = graphPositions(graphWithoutSomeLayout);
+
+    expect(positions.prompting).toEqual({ x: 0, y: 0 });
+    expect(positions.persona).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
+    expect(Number.isFinite(positions.persona.x)).toBe(true);
+    expect(Number.isFinite(positions.persona.y)).toBe(true);
+    expect(Object.keys(positions)).toHaveLength(graphWithoutSomeLayout.nodes.length);
   });
 });
