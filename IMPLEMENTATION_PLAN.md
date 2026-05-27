@@ -7,11 +7,12 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: behavioral specs `specs/01-graph-availability.md` through `specs/17-keyboard-operations.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`. The latest Phase 2 requirements include keyboard operations, shift-click multi-selection/relation creation, single creation dialogs, concept type choose-or-new entry, auto-connecting new concepts to selected concepts, and details-panel editing.
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, and saved positions.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
-- Present: validation commands are known passing for the current increment: `pnpm test` (6 files, 32 tests) and `pnpm build`.
+- Present: validation commands are known passing for the current increment: focused app integration test, `pnpm test` (7 files, 33 tests), and `pnpm build`.
 - Present: non-blocking recoverable graph warnings for layout/origin issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
 - Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent question panel.
 - Present in Phase 2 UI: single concept/relationship creation dialogs, concept type datalist choose-or-new entry, ordered shift-click concept multi-selection with count/visual distinction and relationship endpoint defaults, optional selected-concept auto-connect as one atomic validated persisted undoable mutation, relationship direction/reverse controls, edit-mode details-panel forms for concept label/type/notes and relationship label/notes with source/target read-only, and guarded Delete/Backspace deletion outside editable controls.
-- Still missing: automated frontend integration coverage and manual browser smoke evidence for the Phase 2 UI flows.
+- Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
+- Still missing: manual browser smoke evidence for the Phase 2 UI flows.
 - Present: `specs/10-manual-editing.md` requires current-session undo/redo for recent accepted manual edits without historical replay, branching, reload persistence, or audit-grade provenance.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
@@ -79,9 +80,9 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Completed: edit-mode details-panel forms support concept label/type/notes and relationship label/notes edits; relationship source/target remain read-only.
   - Completed: Delete/Backspace deletion uses the protected deletion path outside editable controls, while dialogs, details-panel inputs, textareas, selects, and contenteditable elements keep normal editing behavior.
 
-- [ ] Add frontend integration/UI validation for current Phase 2 UI flows.
-  - Cover app-level edit-mode gating, ordered shift-click multi-selection, single creation dialogs, selected-concept auto-connect creation, relationship direction/reverse controls, details-panel edits, Delete/Backspace deletion, keyboard focus guards, undo/redo UI effects, and localStorage round trips.
-  - Automated frontend integration coverage and manual browser smoke evidence are still missing for these flows.
+- [ ] Partially completed: add frontend integration/UI validation for current Phase 2 UI flows.
+  - Completed: automated app-level/jsdom coverage for edit-mode gating, ordered shift-click multi-selection with visual class behavior, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo UI effects, and Reload graph UI localStorage round trip after deletion.
+  - Remaining: manual browser smoke evidence for these flows.
 
 - [ ] Partially completed: extend validity protection across all graph changes.
   - Completed for loaded graphs, manual mutations, generic `saveGraph`, `saveLayout` finite-coordinate rejection, recoverable layout/origin warning surfacing, and fallback-position confidence coverage.
@@ -101,23 +102,21 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: `pnpm test` passes with 6 files / 32 tests; `pnpm build` passes.
+  - Current handoff validation: focused app integration test passes; `pnpm test` passes with 7 files / 33 tests; `pnpm build` passes.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
-- [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; review-mode content actions explain how to enable editing; recoverable errors keep graph review usable.
+- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, and recoverable-error usability.
 - [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, current-session undo/redo history, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
-- [ ] Phase 2 UI smoke/tests: enable edit mode; shift-click multiple concepts; verify selection count and visual distinction; open relationship creation from two ordered selected concepts; reverse direction; save; inspect the created relationship.
-- [ ] Phase 2 creation dialog smoke/tests: create concept through one dialog; choose an existing type and enter a new type; create a concept while concepts are selected and connect it to all selected concepts atomically; reject invalid input without replacing the prior graph.
-- [ ] Phase 2 details-panel smoke/tests: select a concept/relationship in edit mode; edit supported fields through panel controls; verify graph/inspector/count updates, persistence, undo/redo coverage, invalid-input rejection, and normal typing/backspace behavior inside inputs.
-- [ ] Phase 2 keyboard smoke/tests: Delete/Backspace outside editable controls uses protected deletion; Delete/Backspace inside dialogs/details controls edits text only; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, and Ctrl+Y update graph, selection, inspector, and counts without corrupting graph state.
+- [x] Phase 2 app-level/jsdom UI tests: cover edit-mode gating, ordered shift-click multi-selection including visual class behavior, relationship dialog endpoint prefill/reverse direction, concept creation with selected-concept auto-connect, details-panel edits, Delete/Backspace focus guard and deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
+- [ ] Phase 2 manual browser smoke: confirm the same dialog, multi-selection, details-panel, keyboard, undo/redo, and localStorage flows in a real browser.
 - [x] Phase 3 question tests: renderer-neutral agent answers are graph-grounded and non-mutating.
 - [ ] Phase 3 graph-change tests later: proposed edits are previewed, validated, applied/rejected safely, and summarized.
 
 ## Open decisions
 
-- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, Phase 2 dialog/multi-selection/details-panel/keyboard flows, undo/redo controls, localStorage round trips, and the secondary agent question panel in the browser.
+- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, Phase 2 dialog/multi-selection/details-panel/keyboard flows, undo/redo controls, localStorage round trips, and the secondary agent question panel in the browser; automated jsdom coverage now covers the key Phase 2 UI paths.
 - Remaining Phase 3 agent graph changes: proposal preview, shared validation, safe apply/reject behavior, and plain-language summaries.
 - Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
 
