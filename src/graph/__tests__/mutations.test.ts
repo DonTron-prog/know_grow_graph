@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fixtureGraph from '../../../fixtures/source_graph.example.json';
-import { createConcept, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from '../mutations';
+import { createConcept, createConceptWithRelationships, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from '../mutations';
 import { loadGraph, saveGraph, saveLayout, WORKING_GRAPH_STORAGE_KEY } from '../storage';
 import { requireValidGraph } from '../validation';
 
@@ -43,6 +43,30 @@ describe('graph mutations', () => {
     expect(result.graph.edges.find((edge) => edge.id === result.changedId)).toMatchObject({ source: 'prompting', target: 'evaluation', label: 'supports', origin: 'user' });
     expect(() => createRelationship(graph, { source: 'prompting', target: 'missing', label: 'breaks' })).toThrow(/not available/);
     expect(graph.edges).toHaveLength(11);
+  });
+
+  it('creates a concept and selected-concept relationships as one validated change', () => {
+    const graph = fixture();
+
+    const result = createConceptWithRelationships(
+      graph,
+      { label: 'Manual synthesis', type: 'practice', notes: 'Added during review.', position: { x: 5, y: 6 } },
+      [
+        { existingConceptId: 'prompting', direction: 'existing-to-new', label: 'informs', notes: 'Prompting informs synthesis.' },
+        { existingConceptId: 'evaluation', direction: 'new-to-existing', label: 'requires' },
+      ],
+    );
+
+    expect(result.changedId).toBe('manual-synthesis');
+    expect(result.graph.nodes.find((node) => node.id === 'manual-synthesis')).toMatchObject({ label: 'Manual synthesis', type: 'practice', origin: 'user' });
+    expect(result.graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'prompting', target: 'manual-synthesis', label: 'informs', origin: 'user' }),
+      expect.objectContaining({ source: 'manual-synthesis', target: 'evaluation', label: 'requires', origin: 'user' }),
+    ]));
+    expect(result.graph.layout?.['manual-synthesis']).toEqual({ x: 5, y: 6 });
+    expect(graph.nodes.some((node) => node.id === 'manual-synthesis')).toBe(false);
+    expect(() => createConceptWithRelationships(graph, { label: 'Broken', type: 'practice' }, [{ existingConceptId: 'missing', direction: 'existing-to-new', label: 'breaks' }])).toThrow(/not available/);
+    expect(() => createConceptWithRelationships(graph, { label: 'Broken', type: 'practice' }, [{ existingConceptId: 'prompting', direction: 'existing-to-new', label: '   ' }])).toThrow(/Relationship label is required/);
   });
 
   it('updates supported concept and relationship fields without mutating source-derived inputs', () => {

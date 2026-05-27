@@ -4,12 +4,14 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 
 ## Confirmed current state
 
-- Present: behavioral specs `specs/01-graph-availability.md` through `specs/16-scope-boundaries.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`.
+- Present: behavioral specs `specs/01-graph-availability.md` through `specs/17-keyboard-operations.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`. The latest Phase 2 requirements include keyboard operations, shift-click multi-selection/relation creation, single creation dialogs, concept type choose-or-new entry, auto-connecting new concepts to selected concepts, and details-panel editing.
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, and saved positions.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
-- Present: validation commands are known passing for the current increment: `pnpm test` (6 files, 31 tests) and `pnpm build`.
+- Present: validation commands are known passing for the current increment: `pnpm test` (6 files, 32 tests) and `pnpm build`.
 - Present: non-blocking recoverable graph warnings for layout/origin issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
-- Present in `src/app.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, Phase 2 editing controls with edit-mode gated toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent question panel.
+- Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent question panel.
+- Present in Phase 2 UI: single concept/relationship creation dialogs, concept type datalist choose-or-new entry, ordered shift-click concept multi-selection with count/visual distinction and relationship endpoint defaults, optional selected-concept auto-connect as one atomic validated persisted undoable mutation, relationship direction/reverse controls, edit-mode details-panel forms for concept label/type/notes and relationship label/notes with source/target read-only, and guarded Delete/Backspace deletion outside editable controls.
+- Still missing: automated frontend integration coverage and manual browser smoke evidence for the Phase 2 UI flows.
 - Present: `specs/10-manual-editing.md` requires current-session undo/redo for recent accepted manual edits without historical replay, branching, reload persistence, or audit-grade provenance.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
@@ -64,12 +66,22 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Remaining: finish confidence/polish around saved-position round trip and save-failure handling after layout interactions are stable.
 
 - [x] Implement Phase 2 manual graph operations behind an explicit editing affordance.
-  - Added renderer-neutral validated mutations for add concept, add relationship, edit concept/relationship fields, delete selected concept/relationship, and layout/reposition updates.
-  - Added explicit content editing mode so review mode remains safe by default; drag repositioning is active only while content editing is enabled.
-  - Resolved screenshot issue: review-mode content action buttons are no longer disabled/gray; clicking them explains that content editing must be enabled, and edit/delete without a selection now shows actionable messages.
-  - Accepted manual changes persist to the existing working graph localStorage path.
-  - Added current-session undo/redo for accepted manual edits, available only while edit mode is active through toolbar controls and keyboard shortcuts.
-  - Acceptance met in automated coverage: valid changes update graph/storage; invalid changes leave the previous valid graph unchanged; focused history tests cover undo/redo behavior.
+  - Completed: renderer-neutral validated mutations for add concept, add relationship, edit concept/relationship fields, delete selected concept/relationship, and layout/reposition updates.
+  - Completed: explicit content editing mode keeps review mode safe by default; drag repositioning is active only while content editing is enabled.
+  - Completed: review-mode content action buttons explain that content editing must be enabled, and edit/delete without a selection shows actionable messages.
+  - Completed: accepted manual changes persist to the existing working graph localStorage path.
+  - Completed: current-session undo/redo helpers are available while edit mode is active through toolbar controls and Ctrl/Cmd keyboard shortcuts.
+  - Completed: single concept and relationship creation dialogs replaced sequential `window.prompt` creation flows.
+  - Completed: concept creation captures label, type, and notes; type uses a datalist so users can choose an existing graph type or enter a new value.
+  - Completed: ordered edit-mode multi-selection via shift-click includes selection count display, visual distinction for multi-selected concepts, clear/unavailable-selection behavior, and ordered two-concept defaults for relationship creation.
+  - Completed: concept creation can optionally connect the new concept to every selected concept with relationship details as one validated, persisted, undoable, atomic graph mutation.
+  - Completed: relationship creation dialog includes source, target, label, notes, direction/reverse controls, and ordered endpoint prefill from shift-selection.
+  - Completed: edit-mode details-panel forms support concept label/type/notes and relationship label/notes edits; relationship source/target remain read-only.
+  - Completed: Delete/Backspace deletion uses the protected deletion path outside editable controls, while dialogs, details-panel inputs, textareas, selects, and contenteditable elements keep normal editing behavior.
+
+- [ ] Add frontend integration/UI validation for current Phase 2 UI flows.
+  - Cover app-level edit-mode gating, ordered shift-click multi-selection, single creation dialogs, selected-concept auto-connect creation, relationship direction/reverse controls, details-panel edits, Delete/Backspace deletion, keyboard focus guards, undo/redo UI effects, and localStorage round trips.
+  - Automated frontend integration coverage and manual browser smoke evidence are still missing for these flows.
 
 - [ ] Partially completed: extend validity protection across all graph changes.
   - Completed for loaded graphs, manual mutations, generic `saveGraph`, `saveLayout` finite-coordinate rejection, recoverable layout/origin warning surfacing, and fallback-position confidence coverage.
@@ -81,6 +93,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Added renderer-neutral `answerGraphQuestion` coverage; tests and build pass for this increment.
 
 - [ ] Implement Phase 3 validated agent graph changes after manual editing is dependable.
+  - Do not start agent graph-change application until Phase 2 manual editing is dependable under the current dialog, multi-selection, details-panel, keyboard, undo/redo, and validity-protection requirements.
   - Return proposed graph changes for user review.
   - Validate proposals before application using the same graph validity layer.
   - Apply valid proposals promptly, reject invalid proposals safely, and summarize applied changes in plain language.
@@ -88,21 +101,24 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: `pnpm test` passes with 6 files / 31 tests; `pnpm build` passes.
+  - Current handoff validation: `pnpm test` passes with 6 files / 32 tests; `pnpm build` passes.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
 - [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; review-mode content actions explain how to enable editing; recoverable errors keep graph review usable.
 - [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, current-session undo/redo history, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
+- [ ] Phase 2 UI smoke/tests: enable edit mode; shift-click multiple concepts; verify selection count and visual distinction; open relationship creation from two ordered selected concepts; reverse direction; save; inspect the created relationship.
+- [ ] Phase 2 creation dialog smoke/tests: create concept through one dialog; choose an existing type and enter a new type; create a concept while concepts are selected and connect it to all selected concepts atomically; reject invalid input without replacing the prior graph.
+- [ ] Phase 2 details-panel smoke/tests: select a concept/relationship in edit mode; edit supported fields through panel controls; verify graph/inspector/count updates, persistence, undo/redo coverage, invalid-input rejection, and normal typing/backspace behavior inside inputs.
+- [ ] Phase 2 keyboard smoke/tests: Delete/Backspace outside editable controls uses protected deletion; Delete/Backspace inside dialogs/details controls edits text only; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, and Ctrl+Y update graph, selection, inspector, and counts without corrupting graph state.
 - [x] Phase 3 question tests: renderer-neutral agent answers are graph-grounded and non-mutating.
 - [ ] Phase 3 graph-change tests later: proposed edits are previewed, validated, applied/rejected safely, and summarized.
 
 ## Open decisions
 
-- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, selection states, undo/redo controls, localStorage round trips, and the secondary agent question panel in the browser.
+- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, Phase 2 dialog/multi-selection/details-panel/keyboard flows, undo/redo controls, localStorage round trips, and the secondary agent question panel in the browser.
 - Remaining Phase 3 agent graph changes: proposal preview, shared validation, safe apply/reject behavior, and plain-language summaries.
-- Better forms/status surface: replace prompt-first editing and basic alerts with clearer forms and more polished status presentation.
 - Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
 
 ## Decisions recorded
@@ -112,6 +128,8 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Layout persistence semantics: explicit save layout, not autosave, for Phase 1.
 - Phase 2 editing safety: explicit edit mode with validated mutations before state/storage replacement.
 - Phase 2 undo/redo: current-session history for accepted manual edits is gated by edit mode and does not require replay, branching, reload persistence, or audit-grade provenance.
+- Phase 2 keyboard scope: current supported shortcuts are Delete/Backspace for guarded deletion plus Ctrl/Cmd undo/redo; no additional creation/edit shortcuts until a future spec explicitly adds them.
+- Phase 2 details-panel edit scope: concept label/type/notes and relationship label/notes are editable now; relationship source/target are read-only after creation.
 
 ## Non-goals to preserve
 

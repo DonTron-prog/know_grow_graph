@@ -18,6 +18,7 @@ Phase 1.
 - The graph summary includes the graph name, concept count, relationship count, plus layout state.
 - Selecting a concept shows its label, stable identifier, type, notes, connected concept count, plus connected relationships when available.
 - Selecting a relationship shows its source concept, relationship meaning, target concept, plus notes when available.
+- When manual editing is active, the details panel for a selected concept or relationship can present supported fields as editable controls.
 - Changing selection updates inspector content promptly.
 - Clearing selection returns the inspector to graph-level context.
 - If the selected element becomes invalid or unavailable, the inspector explains the state.
@@ -25,4 +26,4 @@ Phase 1.
 
 ## Non-Goals
 
-- Editing inside the inspector is not required until manual editing is active.
+- Editing unsupported or advanced fields in the inspector is not required.

@@ -16,6 +16,8 @@ Phase 2.
 
 - Users can delete a selected concept when manual editing is active.
 - Users can delete a selected relationship when manual editing is active.
+- Pressing Delete or Backspace can delete the selected concept or relationship when manual editing is active.
+- Delete and Backspace keep normal text-editing behavior while a text field or dialog input is active.
 - Destructive actions are protected from accidental use.
 - Deleting a concept never leaves relationships pointing to missing concepts.
 - Deleting a relationship never removes unrelated concepts.

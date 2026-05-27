@@ -16,6 +16,13 @@ export interface CreateRelationshipInput {
   notes?: string;
 }
 
+export interface CreateConceptRelationshipInput {
+  existingConceptId: string;
+  direction: 'existing-to-new' | 'new-to-existing';
+  label: string;
+  notes?: string;
+}
+
 export interface UpdateConceptInput {
   label?: string;
   type?: string;
@@ -133,6 +140,42 @@ export function createRelationship(graph: KnowledgeGraph, input: CreateRelations
   }));
 
   return { graph: nextGraph, changedId: id };
+}
+
+export function createConceptWithRelationships(
+  graph: KnowledgeGraph,
+  conceptInput: CreateConceptInput,
+  relationshipInputs: CreateConceptRelationshipInput[],
+): GraphMutationResult {
+  const label = trimmedRequired(conceptInput.label, 'Concept label');
+  const type = trimmedRequired(conceptInput.type, 'Concept type');
+  const usedConceptIds = new Set(graph.nodes.map((node) => node.id));
+  const conceptId = uniqueId(slugify(label), usedConceptIds);
+  const position = requireFinitePosition(conceptInput.position ?? nextConceptPosition(graph), 'Concept position');
+  const usedRelationshipIds = new Set(graph.edges.map((edge) => edge.id));
+
+  const relationships = relationshipInputs.map((relationship) => {
+    const existingConceptId = trimmedRequired(relationship.existingConceptId, 'Selected concept');
+    ensureConceptExists(graph, existingConceptId);
+    const relationshipLabel = trimmedRequired(relationship.label, 'Relationship label');
+    const source = relationship.direction === 'new-to-existing' ? conceptId : existingConceptId;
+    const target = relationship.direction === 'new-to-existing' ? existingConceptId : conceptId;
+    const id = uniqueId(`edge-${slugify(source)}-${slugify(relationshipLabel)}-${slugify(target)}`, usedRelationshipIds);
+    usedRelationshipIds.add(id);
+    return { id, source, target, label: relationshipLabel, origin: 'user' as const, notes: optionalTrimmed(relationship.notes), properties: {} };
+  });
+
+  const nextGraph = validateMutation(withWorkingMetadata({
+    ...graph,
+    nodes: [
+      ...graph.nodes,
+      { id: conceptId, label, type, origin: 'user', notes: optionalTrimmed(conceptInput.notes), properties: {} },
+    ],
+    edges: [...graph.edges, ...relationships],
+    layout: { ...(graph.layout ?? {}), [conceptId]: position },
+  }));
+
+  return { graph: nextGraph, changedId: conceptId };
 }
 
 export function updateConcept(graph: KnowledgeGraph, conceptId: string, input: UpdateConceptInput): GraphMutationResult {

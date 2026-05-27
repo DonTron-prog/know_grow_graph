@@ -18,6 +18,9 @@ Phase 1.
 - Hovering a relationship gives clear interactive feedback when relationship hover is supported.
 - Selecting a concept makes it visibly distinct from unselected concepts.
 - Selecting a relationship makes it visibly distinct from unselected relationships when relationship selection is supported.
+- Users can add concepts to a multi-selection with shift-click when manual editing is active.
+- Multi-selected concepts remain visibly distinct from unselected concepts.
+- The order of a two-concept shift-selection is available for relationship creation defaults.
 - Changing focus updates the highlighted element promptly.
 - Clearing focus returns the graph to an unselected review state.
 - Focus changes do not mutate graph content.
@@ -25,4 +28,4 @@ Phase 1.
 
 ## Non-Goals
 
-- Multi-selection is optional until single-element focus is dependable.
+- Advanced lasso or marquee selection is not required.

@@ -5,7 +5,7 @@ These files describe user-facing behavior for the knowledge graph workbench. Eac
 ## Current phase order
 
 1. Graph availability, workbench focus, visualization, layout, navigation, focus, inspection, and feedback.
-2. Manual creation, editing, deletion, repositioning, and graph validity protection.
+2. Manual creation, editing, deletion, repositioning, keyboard operations, and graph validity protection.
 3. Agent question answering and validated agent-assisted graph changes that reuse graph validity protection.
 
 ## Rules for numbered specs

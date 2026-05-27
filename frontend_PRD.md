@@ -56,15 +56,19 @@ After Cytoscape.js render/layout is validated, add manual operations incremental
 
 Required operations:
 
-- add concept node
-- add relationship edge
-- delete selected concept or relationship
-- edit concept label/type/notes
-- edit relationship label/notes
+- add concept node through a single creation dialog
+- add relationship edge through a single creation dialog
+- shift-click two concepts to open relationship creation with those concepts prefilled
+- choose relationship direction in the relationship creation dialog
+- connect a new concept to every selected concept when confirmed in the creation dialog
+- delete selected concept or relationship, including Delete/Backspace keyboard deletion when safe
+- edit concept label/type/notes from the selected-element details panel
+- edit relationship label/notes from the selected-element details panel
+- undo and redo accepted manual changes, including details-panel edits, with common keyboard shortcuts
 - drag/reposition concept nodes if not already completed in Phase 1
 - select one concept
 - select one relationship
-- select multiple concepts if the interaction model supports it cleanly
+- select multiple concepts with shift-click
 
 Nice-to-have operations after basics work:
 
@@ -97,19 +101,19 @@ Use a simple desktop workbench layout.
 
 ```text
 ┌────────────────────────────────────────────────────────────────────┐
-│ Toolbar: Load | Layout | Add Concept | Add Relation | Delete | Save │
+│ Toolbar: Load | Layout | Add | Relate | Delete | Undo | Save       │
 ├──────────────────┬───────────────────────────────┬─────────────────┤
-│ Inspector         │ Cytoscape.js Graph View       │ Agent Panel      │
-│ selected element  │ concepts, relations, labels   │ disabled/minimal │
-│ properties        │ zoom, pan, drag, select       │ until Phase 3    │
+│ Graph/summary     │ Cytoscape.js Graph View       │ Details panel    │
+│ context           │ concepts, relations, labels   │ inspect/edit     │
+│                   │ zoom, pan, drag, select       │ selected element │
 └──────────────────┴───────────────────────────────┴─────────────────┘
 ```
 
-For Phase 1, the right Agent Panel may be hidden, collapsed, or replaced by a debug panel.
+For Phase 1, the details panel may be read-only. The Agent Panel may be hidden, collapsed, or deferred until Phase 3.
 
-## 7. Inspector
+## 7. Details Panel / Inspector
 
-The inspector explains the current graph selection.
+The details panel explains the current graph selection and becomes the selected-element editor in Phase 2.
 
 For a selected concept node, show:
 
@@ -134,7 +138,7 @@ If nothing is selected, show:
 - relationship count
 - layout status
 
-Editing can wait until Phase 2.
+In Phase 2, supported concept and relationship fields are editable from the selected-element details panel when manual editing is active.
 
 ## 8. Graph Model and Backend Expectations
 
@@ -185,6 +189,6 @@ Phase 1 succeeds when:
 5. Labels are readable at the target graph scale.
 6. The implementation is simple enough to iterate on manual operations next.
 
-Phase 2 succeeds when manual add/delete/edit/reposition operations work.
+Phase 2 succeeds when manual add/delete/edit/reposition operations, selected-element details editing, relationship creation from shift-selection, and undo/redo keyboard operations work.
 
 Phase 3 succeeds when the agent can answer questions and manipulate the graph through validated operations that do not depend on a browser DOM.
