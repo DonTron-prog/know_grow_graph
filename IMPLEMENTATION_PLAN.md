@@ -7,9 +7,10 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: behavioral specs `specs/01-graph-availability.md` through `specs/16-scope-boundaries.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`.
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, and saved positions.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
-- Present: validation commands are known passing for the current increment: `pnpm test` (5 files, 28 tests) and `pnpm build`.
+- Present: validation commands are known passing for the current increment: `pnpm test` (6 files, 31 tests) and `pnpm build`.
 - Present: non-blocking recoverable graph warnings for layout/origin issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
-- Present in `src/app.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, Phase 2 editing controls, and a secondary Phase 3 agent question panel.
+- Present in `src/app.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, Phase 2 editing controls with edit-mode gated toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent question panel.
+- Present: `specs/10-manual-editing.md` requires current-session undo/redo for recent accepted manual edits without historical replay, branching, reload persistence, or audit-grade provenance.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
 ## Prioritized implementation plan
@@ -67,7 +68,8 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Added explicit content editing mode so review mode remains safe by default; drag repositioning is active only while content editing is enabled.
   - Resolved screenshot issue: review-mode content action buttons are no longer disabled/gray; clicking them explains that content editing must be enabled, and edit/delete without a selection now shows actionable messages.
   - Accepted manual changes persist to the existing working graph localStorage path.
-  - Acceptance met in automated coverage: valid changes update graph/storage; invalid changes leave the previous valid graph unchanged.
+  - Added current-session undo/redo for accepted manual edits, available only while edit mode is active through toolbar controls and keyboard shortcuts.
+  - Acceptance met in automated coverage: valid changes update graph/storage; invalid changes leave the previous valid graph unchanged; focused history tests cover undo/redo behavior.
 
 - [ ] Partially completed: extend validity protection across all graph changes.
   - Completed for loaded graphs, manual mutations, generic `saveGraph`, `saveLayout` finite-coordinate rejection, recoverable layout/origin warning surfacing, and fallback-position confidence coverage.
@@ -86,19 +88,19 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: `pnpm test` passes with 5 files / 28 tests; `pnpm build` passes.
+  - Current handoff validation: `pnpm test` passes with 6 files / 31 tests; `pnpm build` passes.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
 - [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; review-mode content actions explain how to enable editing; recoverable errors keep graph review usable.
-- [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
+- [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, current-session undo/redo history, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
 - [x] Phase 3 question tests: renderer-neutral agent answers are graph-grounded and non-mutating.
 - [ ] Phase 3 graph-change tests later: proposed edits are previewed, validated, applied/rejected safely, and summarized.
 
 ## Open decisions
 
-- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, selection states, localStorage round trips, and the secondary agent question panel in the browser.
+- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, selection states, undo/redo controls, localStorage round trips, and the secondary agent question panel in the browser.
 - Remaining Phase 3 agent graph changes: proposal preview, shared validation, safe apply/reject behavior, and plain-language summaries.
 - Better forms/status surface: replace prompt-first editing and basic alerts with clearer forms and more polished status presentation.
 - Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
@@ -109,6 +111,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Phase 1 persistence: fixture fallback plus browser localStorage working graph.
 - Layout persistence semantics: explicit save layout, not autosave, for Phase 1.
 - Phase 2 editing safety: explicit edit mode with validated mutations before state/storage replacement.
+- Phase 2 undo/redo: current-session history for accepted manual edits is gated by edit mode and does not require replay, branching, reload persistence, or audit-grade provenance.
 
 ## Non-goals to preserve
 

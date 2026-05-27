@@ -3,11 +3,13 @@ import type { Core, EventObject, NodeSingular, EdgeSingular } from 'cytoscape';
 import './styles/app.css';
 import { toCytoscapeElements } from './graph/cytoscapeAdapter';
 import { answerGraphQuestion } from './graph/agentQuestions';
+import { canRedo, canUndo, emptyGraphHistory, redoGraph, rememberGraph, undoGraph } from './graph/history';
 import { connectedEdges, relationshipCounts } from './graph/metrics';
 import { createConcept, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from './graph/mutations';
 import { loadGraph, saveGraph, saveLayout } from './graph/storage';
 import { validateGraph } from './graph/validation';
 import type { GraphQuestionAnswer } from './graph/agentQuestions';
+import type { GraphHistory, GraphHistoryStep } from './graph/history';
 import type { GraphMutationResult } from './graph/mutations';
 import type { GraphPosition, KnowledgeGraph } from './graph/types';
 
@@ -21,6 +23,7 @@ interface AppState {
   saving: boolean;
   editMode: boolean;
   warnings: string[];
+  history: GraphHistory;
   agentQuestion: string;
   agentAnswer?: GraphQuestionAnswer;
   message?: string;
@@ -50,6 +53,7 @@ let state: AppState = {
   saving: false,
   editMode: false,
   warnings: validationWarnings(initialLoad.validation),
+  history: emptyGraphHistory(),
   agentQuestion: '',
 };
 let cy: Core | undefined;
@@ -70,6 +74,7 @@ function loadIntoState(): void {
       saving: false,
       editMode: state.editMode,
       warnings: recoveredFromInvalidSavedGraph ? [] : validationWarnings(result.validation),
+      history: emptyGraphHistory(),
       agentQuestion: state.agentQuestion,
       agentAnswer: undefined,
       message: result.recoveryMessage ?? `Loaded ${result.source === 'working' ? 'saved working graph' : 'example Agentic AI graph'}.`,
@@ -94,6 +99,8 @@ function renderShell(): void {
         <button type="button" data-action="fit">Fit</button>
         <button type="button" data-action="reset-layout">Reset layout</button>
         <button type="button" data-action="save-layout" ${state.saving ? 'disabled' : ''}>${state.saving ? 'Saving…' : 'Save layout'}</button>
+        <button type="button" data-action="undo" ${state.editMode && canUndo(state.history) ? '' : 'disabled'} title="Undo recent edit (Ctrl/Cmd+Z)">Undo</button>
+        <button type="button" data-action="redo" ${state.editMode && canRedo(state.history) ? '' : 'disabled'} title="Redo recent edit (Ctrl/Cmd+Shift+Z or Ctrl+Y)">Redo</button>
         <button type="button" data-action="toggle-edit-mode" class="${state.editMode ? 'active' : ''}">${state.editMode ? 'Content editing active' : 'Turn on content editing'}</button>
         <button type="button" data-action="add-concept">Add concept</button>
         <button type="button" data-action="add-relationship">Add relationship</button>
@@ -108,6 +115,8 @@ function renderShell(): void {
         <span>Source: ${state.source}</span>
         <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>
         ${state.warnings.length > 0 ? `<span>${state.warnings.length} warning${state.warnings.length === 1 ? '' : 's'}</span>` : ''}
+        ${state.editMode && canUndo(state.history) ? '<span>Undo available</span>' : ''}
+        ${state.editMode && canRedo(state.history) ? '<span>Redo available</span>' : ''}
       </section>
       ${state.message ? `<p class="message">${escapeHtml(state.message)}</p>` : ''}
       ${renderWarnings()}
@@ -204,19 +213,6 @@ function renderAgentPanel(): string {
       </section>` : '<p class="panel-note">Try a summary question, a concept label, or a relationship label.</p>'}`;
 }
 
-function updateStatusStrip(): void {
-  const statusStrip = document.querySelector<HTMLElement>('.status-strip');
-  if (!statusStrip) return;
-  statusStrip.innerHTML = `
-    <span>${state.graph.nodes.length} concepts</span>
-    <span>${state.graph.edges.length} relationships</span>
-    <span>${state.selectedId ? '1 selected' : '0 selected'}</span>
-    <span>Layout ${state.layoutStatus}</span>
-    <span>Source: ${state.source}</span>
-    <span>${state.editMode ? 'Content editing on' : 'Review mode'}</span>
-    ${state.warnings.length > 0 ? `<span>${state.warnings.length} warning${state.warnings.length === 1 ? '' : 's'}</span>` : ''}`;
-}
-
 function mountGraph(viewport?: GraphViewport): void {
   const container = document.querySelector<HTMLDivElement>('#cy');
   if (!container) return;
@@ -280,14 +276,20 @@ function mountGraph(viewport?: GraphViewport): void {
     cy.on('mouseout', 'node, edge', (event) => event.target.removeClass('hovered'));
     cy.on('dragfree', 'node', (event) => {
       if (!state.editMode) return;
+      const previousGraph = state.graph;
+      const viewportAfterDrag = currentViewport();
       try {
         state.graph = moveConcept(state.graph, event.target.id(), event.target.position()).graph;
+        state.history = rememberGraph(state.history, previousGraph);
         state.layoutStatus = 'unsaved';
-        updateStatusStrip();
+        state.message = 'Concept position updated. Use Save layout to keep it after reload.';
+        state.error = undefined;
+        renderShell();
+        mountGraph(viewportAfterDrag);
       } catch (error) {
         state.error = error instanceof Error ? error.message : 'Concept repositioning failed.';
         renderShell();
-        mountGraph();
+        mountGraph(viewportAfterDrag);
       }
     });
     if (viewport) {
@@ -342,17 +344,20 @@ function handleAction(action: string | undefined): void {
       cy?.fit(undefined, 50);
       break;
     case 'reset-layout':
-      cy?.layout({ name: 'cose', animate: false, padding: 50 }).run();
-      rememberCurrentLayout();
-      state.layoutStatus = 'unsaved';
-      updateStatusStrip();
+      resetLayoutWithHistory();
       break;
     case 'save-layout':
       saveCurrentLayout();
       break;
+    case 'undo':
+      undoLastGraphChange();
+      break;
+    case 'redo':
+      redoLastGraphChange();
+      break;
     case 'toggle-edit-mode':
       state.editMode = !state.editMode;
-      state.message = state.editMode ? 'Content editing is active. Changes are validated before replacing the working graph.' : 'Review mode is active. Content changes and direct concept dragging are disabled.';
+      state.message = state.editMode ? 'Content editing is active. Changes are validated before replacing the working graph. Undo and redo are available for this session.' : 'Review mode is active. Content changes, undo/redo, and direct concept dragging are disabled.';
       renderShell();
       mountGraph();
       break;
@@ -419,14 +424,17 @@ function applyMutation(message: string, mutation: () => GraphMutationResult, sel
   if (!ensureEditing()) return;
 
   try {
+    const previousGraph = state.graph;
     const result = mutation();
     const savedGraph = saveGraph(result.graph);
     state.graph = savedGraph;
+    state.history = rememberGraph(state.history, previousGraph);
     state.source = 'working';
     state.layoutStatus = 'saved';
     state.message = message;
     state.error = undefined;
     state.warnings = graphWarnings(savedGraph);
+    state.agentAnswer = undefined;
     state.selectedKind = selectKind;
     state.selectedId = selectKind ? result.changedId : undefined;
     renderShell();
@@ -522,15 +530,33 @@ function deleteSelectedFromPrompt(): void {
   );
 }
 
+function resetLayoutWithHistory(): void {
+  if (!cy) return;
+
+  const previousGraph = state.graph;
+  const viewport = currentViewport();
+  try {
+    cy.layout({ name: 'cose', animate: false, padding: 50 }).run();
+    rememberCurrentLayout();
+    state.history = rememberGraph(state.history, previousGraph);
+    state.layoutStatus = 'unsaved';
+    state.message = 'Layout reset. Use Save layout to keep it after reload.';
+    state.error = undefined;
+    renderShell();
+    mountGraph(viewport);
+  } catch (error) {
+    state.graph = previousGraph;
+    state.error = error instanceof Error ? error.message : 'Layout update failed.';
+    renderShell();
+    mountGraph(viewport);
+  }
+}
+
 function rememberCurrentLayout(): void {
   if (!cy) return;
-  try {
-    cy.nodes().forEach((node) => {
-      state.graph = moveConcept(state.graph, node.id(), node.position()).graph;
-    });
-  } catch (error) {
-    state.error = error instanceof Error ? error.message : 'Layout update failed.';
-  }
+  cy.nodes().forEach((node) => {
+    state.graph = moveConcept(state.graph, node.id(), node.position()).graph;
+  });
 }
 
 function saveCurrentLayout(): void {
@@ -556,6 +582,64 @@ function saveCurrentLayout(): void {
     state.saving = false;
     renderShell();
     mountGraph();
+  }
+}
+
+function undoLastGraphChange(): void {
+  if (!ensureEditing()) return;
+  const step = undoGraph(state.history, state.graph);
+  if (!step) {
+    state.message = undefined;
+    state.error = 'No edits are available to undo.';
+    renderShell();
+    mountGraph();
+    return;
+  }
+  restoreHistoryStep(step, 'Undid the most recent graph change.');
+}
+
+function redoLastGraphChange(): void {
+  if (!ensureEditing()) return;
+  const step = redoGraph(state.history, state.graph);
+  if (!step) {
+    state.message = undefined;
+    state.error = 'No edits are available to redo.';
+    renderShell();
+    mountGraph();
+    return;
+  }
+  restoreHistoryStep(step, 'Redid the most recent graph change.');
+}
+
+function restoreHistoryStep(step: GraphHistoryStep, message: string): void {
+  const viewport = currentViewport();
+  try {
+    const savedGraph = saveGraph(step.graph);
+    state.graph = savedGraph;
+    state.history = step.history;
+    state.source = 'working';
+    state.layoutStatus = 'saved';
+    state.message = message;
+    state.error = undefined;
+    state.warnings = graphWarnings(savedGraph);
+    state.agentAnswer = undefined;
+    reconcileSelection();
+  } catch (error) {
+    state.message = undefined;
+    state.error = error instanceof Error ? error.message : 'Undo or redo was rejected.';
+  }
+  renderShell();
+  mountGraph(viewport);
+}
+
+function reconcileSelection(): void {
+  if (!state.selectedId || !state.selectedKind) return;
+  const selectionIsAvailable = state.selectedKind === 'concept'
+    ? state.graph.nodes.some((node) => node.id === state.selectedId)
+    : state.graph.edges.some((edge) => edge.id === state.selectedId);
+  if (!selectionIsAvailable) {
+    state.selectedId = undefined;
+    state.selectedKind = undefined;
   }
 }
 
@@ -586,5 +670,34 @@ function renderWarnings(): string {
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char] ?? char);
 }
+
+function handleKeyboardShortcut(event: KeyboardEvent): void {
+  if (isEditableTarget(event.target)) return;
+  const usesShortcutModifier = event.metaKey || event.ctrlKey;
+  if (!usesShortcutModifier || event.altKey) return;
+
+  const key = event.key.toLowerCase();
+  if (key === 'z' && event.shiftKey) {
+    event.preventDefault();
+    redoLastGraphChange();
+    return;
+  }
+  if (key === 'z') {
+    event.preventDefault();
+    undoLastGraphChange();
+    return;
+  }
+  if (key === 'y') {
+    event.preventDefault();
+    redoLastGraphChange();
+  }
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable;
+}
+
+document.addEventListener('keydown', handleKeyboardShortcut);
 
 loadIntoState();
