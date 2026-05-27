@@ -1,92 +1,110 @@
 # IMPLEMENTATION_PLAN.md
 
-Plan-only snapshot for the first PoC, refreshed after the completed P1 real pi-agent CLI bridge increment. Requirements are in `specs/frontend_spec.md`, `specs/backend_spec.md`, `frontend_PRD.md`, and `README.md`.
-
-## Completed in the latest BUILD iteration
-
-- Implemented the frontend P0 graph interaction slice in `apps/frontend/src/App.tsx` plus `apps/frontend/src/graphInteraction.ts`.
-- The central SVG/equivalent renderer now supports zoom, pan, local node dragging, node selection, edge selection, additive multi-select, and background clear that does not clear selection after a pan.
-- Added inspector graph summary, single-node/single-edge details, invalid/deleted selection messaging, and multi-selection summary/eligibility states.
-- Added styling hooks for origin colors, selected outlines, recent-change highlighting, warning state, and invalid state; Raw now exposes selected and changed IDs for debugging.
-- Completed the frontend P0 editing increment: API-client mutation methods, toolbar add/delete/merge/split/save/load/duplicate/revert wiring, inspector label/type/notes edits, frontend undo/redo restores via `PUT /api/working/graph`, and drag-end layout persistence with canvas-coordinate preservation.
-- Added mutation feedback across Actions, Raw, and StatusBar so successful operations, warnings, backend errors, patch results, changed IDs, and active snapshot state are visible without corrupting the current UI graph.
-- Added frontend tests for API mutations, graph mutation helpers, graph-interaction helpers, and App-level jsdom React behavior in `apps/frontend/test/App.test.ts`.
-- Extended App-level coverage for Add Edge, Delete Selected, Merge Selected, and Split Selected toolbar wiring; tests now assert pan translate, deeper snapshot state/status behavior, prompt/confirm queue consumption, and visible rejected inspector edit rollback.
-- Fixed reviewer findings from the editing increment: layout re-normalization, keyed inspector editors, serialized inspector saves, delete via patch warnings, active snapshot reset on undo/redo, rejected drag reset, and rejected inspector mutation remount/reset via `inspectorResetVersion` so uncontrolled inputs return to last accepted graph values.
-- Removed stale `packages/shared/src/index.js`; `@know-grow/shared` continues to use the source TypeScript export model through `packages/shared/src/index.ts`.
-- Root Node engine is now `>=22.13.0` because jsdom 29 requires Node 22.13+ or a compatible 20/24 line.
-- After post-review refinements, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build` passed.
-- Completed the P0 shared API runtime parsing increment: the frontend API client now parses successful backend responses with shared Zod schemas, exposes source graph fetch, preserves existing `ApiError` behavior, and has tests for malformed successful responses.
-- Validation passed for the shared API runtime parsing increment: `pnpm --filter @know-grow/frontend test`, `pnpm --filter @know-grow/frontend typecheck`, `pnpm --filter @know-grow/frontend lint`, `pnpm --filter @know-grow/shared typecheck`, and `pnpm --filter @know-grow/frontend build`.
-- Final full-workspace validation after the P0 runtime parsing changes passed: `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
-- Completed the first P1 Pi patch-mode integration slice: shared Pi request/response schemas, backend `/api/pi/chat` patch-mode proposal route with mock fallback plus optional pi-agent forwarding/timeout/error handling, and a mockable `apps/pi-agent` HTTP bridge with `/health` and `/api/pi/chat`.
-- Wired the frontend Pi Panel Chat flow for patch mode: prompt input with send-on-Enter/button, conversation history, selected graph context, pending typed patch proposals, Actions/Raw details, and apply-through-`/api/patch/apply` after confirmation.
-- Added focused tests for backend Pi chat no-mutation behavior, frontend API/Pi Panel proposal-then-apply behavior, and pi-agent bridge behavior.
-- Completed the Docker Compose/shared graph-data increment: added Dockerfiles for backend, frontend, and pi-agent; added `docker-compose.yml` with backend and pi-agent sharing host `./.data` at `/graph-data`; configured backend with `DATA_DIR=/graph-data` and `PI_AGENT_URL=http://pi-agent:4100`; configured pi-agent with `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` volume.
-- Frontend startup now pins Vite to `--port 5173` so Docker health checks, port mappings, and docs remain stable.
-- Validation passed after the Docker increment: `docker-compose config`, `docker-compose build`, compose smoke with alternate host ports because `localhost:3001` was already in use (`BACKEND_HOST_PORT=3101 FRONTEND_HOST_PORT=5174 PI_AGENT_HOST_PORT=4101 VITE_API_BASE_URL=http://localhost:3101/api`), pi-agent `/health`, backend `/api/health`, backend `/api/working/graph`, backend-to-pi-agent `/api/pi/chat` forwarding, frontend root HTML, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
-- Completed safe P1 Pi direct JSON mode: shared Pi direct-edit schemas, backend `POST /api/pi/direct-edit`, pi-agent mock `/api/pi/direct-edit`, and frontend patch/direct JSON mode selection.
-- Backend direct JSON now backs up mutable graph files, protects source graph by checksum, reloads and validates disk state after Pi edits, returns only valid graph/snapshot/action-summary results, and restores backups on invalid output or source mutation.
-- Direct JSON validation now returns structured `422 invalid_direct_json_edit` errors for malformed `working_graph` JSON and missing/changed `source_graph`, with backup restore before responding.
-- Frontend direct JSON mode calls `/api/pi/direct-edit` and accepts only the backend-reloaded valid graph state; focused tests cover backend reload/restore/source-checksum behavior, frontend API/Pi Panel acceptance/error paths, and pi-agent mock direct editing.
-- Final validation after reviewer fixes passed: `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
-- Completed the P1 real pi-agent CLI bridge slice: `apps/pi-agent` keeps mock mode by default and can opt into a real Pi CLI adapter with `PI_AGENT_MODE=real|pi|cli`.
-- The real adapter invokes `PI_CLI_COMMAND` (default `pi`) in JSONL mode from `GRAPH_DATA_DIR`, prepends optional `PI_CLI_ARGS`, uses `PI_CLI_TIMEOUT_MS` (default 60000), disables session/context/templates/skills/extensions, exposes no tools for patch mode, and exposes read/write/edit/bash tools for direct JSON mode; compose now passes these opt-in variables through to the pi-agent container and sets backend `PI_REQUEST_TIMEOUT_MS` to 65000 so the CLI timeout fires first.
-- The adapter parses final assistant JSON or plain-text patch-mode messages, preserves direct JSON backend reload/validation semantics, kills child processes on client abort, reports timeout even if a child exits cleanly after SIGTERM, and has focused pi-agent tests.
-- Validation for the real CLI bridge slice passed: `pnpm --filter @know-grow/pi-agent test`, `pnpm --filter @know-grow/pi-agent typecheck`, `docker-compose config`, `pnpm -r test`, `pnpm -r typecheck`, `pnpm -r lint`, and `pnpm --filter @know-grow/frontend build`.
-
-## Current follow-up focus
-
-- Keep the existing SVG renderer for the MVP; defer any Cytoscape.js switch until after MVP evidence shows the SVG path is insufficient.
+Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. Current canonical requirements are the numbered behavioral specs in `specs/` plus implementation direction in `frontend_PRD.md`.
 
 ## Confirmed current state
 
-- The implementation lives under `apps/*` and `packages/*`; root `src/` and `src/lib/` are placeholders only.
-- `apps/backend/src/app.ts` exposes a modular `createApp(...)`; `apps/backend/src/persistence.ts` owns disk-backed JSON initialization/read/write; `apps/backend/src/index.ts` only starts the server.
-- Backend currently implements `GET /api/health`, `GET /api/source/meta`, `GET /api/source/graph`, `GET /api/working/graph`, `PUT /api/working/graph`, `POST /api/working/revert-to-source`, `GET /api/snapshots`, `POST /api/snapshots`, `GET /api/snapshots/:snapshotId`, `POST /api/snapshots/:snapshotId/load`, `POST /api/snapshots/:snapshotId/duplicate`, `POST /api/patch/validate`, `POST /api/patch/apply`, `POST /api/pi/chat`, and `POST /api/pi/direct-edit`.
-- Implemented backend routes already follow the desired conventions: spec-shaped replacement and patch requests, validation/action-summary responses, `{ snapshots }` list responses, and `{ error: { code, message, details? } }` API errors.
-- Backend graph reads are disk-backed per request, and snapshot graph files are persisted separately under `snapshots/<snapshotId>.json`; Pi direct JSON edits are reloaded and validated from disk rather than hidden behind an in-memory cache.
-- Source graph immutability is preserved by working-graph edits, source revert, snapshot load/duplicate flows, and validation/no-mutation failure paths.
-- `packages/shared/src/index.ts` defines canonical graph, snapshot, patch-operation, validation-result, action-summary, source/working graph, source revert, snapshot API envelope, and Pi patch/direct-edit schemas/types.
-- `validateGraphState` covers malformed graph shape, duplicate node IDs, duplicate edge IDs, dangling edge endpoints, and layout entries for missing nodes.
-- `validateGraphPatch`/`applyGraphPatch` now cover patch blocker/warning generation, immutable application, action summaries, changed IDs, merge/split semantics, and direct source-graph mutation blocking.
-- `fixtures/source_graph.example.json` is a checked-in non-private fixture for first render/startup fallback.
-- Frontend now has a Vite/React/TypeScript graph interaction and editing slice: the MVP SVG renderer supports zoom/pan/node drag, drag-end layout persistence, node/edge selection, additive multi-select, background clear, origin/selected/recent-change/warning/invalid styling hooks, inspector label/type/notes edits, toolbar graph/snapshot actions, undo/redo through full working-graph replacement, mutation feedback, and Raw selected/changed IDs.
-- `@know-grow/shared` currently remains source-TypeScript exported from `packages/shared/src/index.ts`; the stale `packages/shared/src/index.js` placeholder has been removed.
-- The frontend API client parses successful backend response envelopes with shared schemas, exposes source graph fetch, preserves `ApiError` behavior for failed responses and network failures, and tests malformed successful response handling.
-- `apps/pi-agent/src/index.js` now exposes an HTTP bridge with `/health`, `/api/pi/chat`, and `/api/pi/direct-edit`; mock mode remains the default for local testing, while `PI_AGENT_MODE=real|pi|cli` enables the real Pi CLI adapter for patch and direct JSON modes.
-- Dockerfiles exist for backend, frontend, and pi-agent. `docker-compose.yml` runs the stack with backend and pi-agent sharing host `./.data` at `/graph-data`; backend uses `DATA_DIR=/graph-data` and `PI_AGENT_URL=http://pi-agent:4100`; pi-agent uses `GRAPH_DATA_DIR=/graph-data` plus an isolated `pi-agent-state` volume.
-- Shared tests now cover graph validation plus core patch validation/application behavior; backend tests cover patch endpoints, snapshot/source-revert endpoints, validation/no-mutation paths, source immutability, and existing replacement/error routes.
-- Frontend tests now cover API-client mutation behavior, graph mutation helpers, pure graph-interaction helpers, and App-level jsdom React coverage for actual SVG selection, edge selection, multi-select, pan translate, pan-safe background clear, zoom, drag-end layout persistence, inspector edit/rejected rollback, add node, add edge, delete selected, merge selected, split selected, undo/redo, save/load/duplicate/revert snapshots, prompt/confirm queue consumption, StatusBar feedback, rejected replacement recovery, and Pi patch/direct JSON flows.
-- Pi-agent bridge behavior has focused test coverage for health, patch chat, direct JSON mock editing, and real CLI adapter command/protocol handling.
+- Present: behavioral specs `specs/01-graph-availability.md` through `specs/16-scope-boundaries.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`.
+- Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, and saved positions.
+- Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
+- Present: validation commands are known passing for the current increment: `pnpm test` (3 files, 15 tests) and `pnpm build`.
+- Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
-## Prioritized remaining work
+## Prioritized implementation plan
 
-- **P1 - Complete Pi integration beyond the mock Pi bridge.**
-  - The pi-agent now has a real CLI adapter in addition to the default mock mode; remaining work is live Pi credential/container smoke testing and possible protocol hardening as real outputs/failures are observed.
-  - Continue hardening Pi Panel error/status transitions as real bridge failures become observable; patch proposals already flow through Actions/Raw and apply via `/api/patch/apply`, and direct JSON accepts only backend-reloaded valid graph state.
+- [x] Reconcile repository source of truth for the greenfield rewrite.
+  - Deleted legacy files (`README.md`, `PLAN.md`, `specs/backend_spec.md`, `specs/frontend_spec.md`) are intentionally retired for this branch.
+  - Numbered specs are the canonical behavioral specs.
+  - Keep numbered specs behavioral; record technical/API/storage choices in this plan or a technical note.
 
-- **P2 - Document and run a manual visual smoke path.**
-  - Document load, select, drag, add, edit, delete, merge, split, undo/redo, snapshot save/load/duplicate/revert, mock Pi patch, direct JSON edit, and invalid edit recovery steps.
-  - Use local/private graph data only under ignored `.data/`; do not commit private vault content.
+- [x] Create a minimal runnable greenfield scaffold.
+  - Added root package/tooling with pnpm, Vite, TypeScript, build/test scripts, and Vitest.
+  - Added a browser app shell with Cytoscape integration.
+  - Added renderer-neutral graph logic under `src/graph`.
+  - Acceptance met for the current increment: install/dev/test/build commands exist; tests and build are passing per handoff.
 
-- **P2 - Resolve documentation drift and historical placeholders.**
-  - Keep `README`, `frontend_PRD.md`, `specs/*`, and this plan aligned.
-  - Mark root `PLAN.md` as historical/superseded if retained, or update it only when it remains useful.
-  - Decide whether root `src/`/`src/lib/` placeholders should remain for Ralph conventions or be documented as unused because the monorepo implementation lives in `apps/*` and `packages/*`.
+- [x] Define the initial renderer-neutral graph schema and validation layer.
+  - Modeled graph id/name/state type, concepts, relationships, layout, notes, origins, and timestamps from the fixture shape.
+  - Added validation for malformed graph data, duplicate ids, dangling relationship endpoints, and recoverable layout issues.
+  - Treats missing positions as recoverable and ignores/warns on layout entries for unavailable concepts safely.
+  - Remaining later scope: route Phase 2 mutation targets through the same validation layer when editing exists.
 
-- **P2 - Harden validation and observability after functional coverage exists.**
-  - Introduce structured persisted-graph validation errors where non-Pi disk corruption still surfaces as generic `500 internal_error`.
-  - Add logging sufficient to debug Pi failures and validation recovery without leaking private vault data.
+- [x] Add graph metrics and Cytoscape adapter.
+  - Converts canonical graph data to Cytoscape elements with stable ids, labels, source/target edge data, saved positions, origin/state classes, and direct relationship counts.
+  - Keeps Cytoscape JSON as adapter output, not the canonical storage contract.
+  - Adapter tests cover fixture output expectations for concepts, relationships, positions, labels, and relationship-count metadata.
 
-## Open decisions / spec clarifications
+- [x] Implement Phase 1 graph loading and recovery.
+  - Loads a saved working graph from browser localStorage when available; otherwise loads `fixtures/source_graph.example.json`.
+  - Validates before replacing the current graph.
+  - Preserves the last valid graph on recoverable failures.
+  - Phase 1 persistence decision for now: browser localStorage with explicit layout save, not autosave or backend persistence.
 
-- Confirm whether the implemented merge/split edge remapping, replacement-edge conflict handling, source-ref preservation, output node defaults, and changed-element ID conventions are final before broader UI/Pi usage.
-- Confirm generated ID formats and uniqueness scope for user-created nodes, edges, snapshots, and patch IDs.
-- Clarify whether node IDs and edge IDs are separate namespaces or globally unique element IDs for renderer/API purposes.
-- Decide whether shared Zod schemas should remain permissive to unknown fields and empty labels/instructions, or become stricter before user-authored graph edits land.
-- Pick conservative warning thresholds for “many nodes,” “many source-derived edges,” disconnected components, and missing rationale.
-- Harden the real pi-agent CLI protocol if live Pi JSONL/final-message variants differ from the tested adapter contract.
-- Confirm whether `rawPiOutput` should continue exposing adapter events/stderr/finalText as currently implemented, or be normalized/redacted further before broader use.
-- Confirm whether the current timeout contract (`PI_CLI_TIMEOUT_MS` default 60000, backend `PI_REQUEST_TIMEOUT_MS` default 65000) is appropriate for real graph edits.
-- Decide the mock-to-real rollout path: mock remains default, real mode is opt-in via `PI_AGENT_MODE=real|pi|cli`, compose passes the CLI env through, and live container credential/config plus Pi CLI availability still need smoke validation.
+- [x] Implement the focused desktop workbench shell.
+  - Provides the core toolbar/action area, primary Cytoscape graph view, inspector, and minimal activity/status feedback.
+  - Keeps graph review central and avoids a general dashboard feel.
+  - Current shell is sufficient for initial fixture review and iteration.
+
+- [ ] Partially completed: implement Phase 1 graph visualization, layout, and navigation.
+  - Completed baseline rendering of concepts and relationships with labels, saved coordinates, simple styling, and Cytoscape navigation affordances.
+  - Completed initial fit/reset-style navigation hooks sufficient for current workbench evaluation.
+  - Remaining: polish layout fallback behavior and interaction details after more manual smoke testing at desktop size.
+
+- [ ] Partially completed: implement Phase 1 focus, inspector, and activity feedback.
+  - Completed baseline concept/relationship inspection, graph summary/count feedback, selection feedback, and user-actionable load/recovery messaging.
+  - Completed initial activity/status surface for loading/saving/layout state.
+  - Remaining: refine invalid/unavailable selection states and any relationship-selection edge cases found during manual smoke testing.
+
+- [ ] Partially completed: add Phase 1 layout saving only after rendering/layout are stable.
+  - Persistence boundary decided for now: fixture fallback plus browser localStorage working graph.
+  - Layout persistence semantics decided for now: explicit save layout, not autosave.
+  - Remaining: finish confidence/polish around saved-position round trip and save-failure handling after layout interactions are stable.
+
+- [ ] Implement Phase 2 manual graph operations behind an explicit editing affordance.
+  - Add concept, add relationship, edit concept label/type/notes, edit relationship label/notes, delete selected concept/relationship, and concept repositioning if not completed in Phase 1.
+  - Route every manual change through the shared validation/mutation layer before applying.
+  - Acceptance: valid changes update graph/inspector/counts and persist when saving exists; invalid changes leave the previous valid graph unchanged.
+
+- [ ] Extend validity protection across all graph changes.
+  - Apply the same validation rules to loaded, manual, imported, saved, and future agent-proposed changes.
+  - Surface non-blocking warnings without blocking exploratory work.
+  - Acceptance: the displayed graph remains valid after every accepted change.
+
+- [ ] Implement Phase 3 agent questions only after graph review and manual operations are dependable.
+  - Keep agent features secondary.
+  - Ground answers in current graph content.
+  - Ensure question answering never mutates graph content and failures leave graph review usable.
+
+- [ ] Implement Phase 3 validated agent graph changes after manual editing is dependable.
+  - Return proposed graph changes for user review.
+  - Validate proposals before application using the same graph validity layer.
+  - Apply valid proposals promptly, reject invalid proposals safely, and summarize applied changes in plain language.
+
+## Validation plan
+
+- [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
+  - Current handoff validation: `pnpm test` passes with 3 files / 15 tests; `pnpm build` passes.
+  - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
+- [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, and invalid/recoverable layout cases are covered for the initial validation layer.
+- [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
+- [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
+- [ ] Frontend integration/manual smoke: fresh checkout shows the example graph; labels are readable; zoom/pan/fit/reset work; selection updates the inspector; clearing selection returns to graph summary; recoverable errors keep graph review usable.
+- [ ] Phase 2 tests later: valid add/edit/delete/reposition updates graph and counts; invalid changes do not replace the previous valid graph.
+- [ ] Phase 3 tests later: agent answers are non-mutating; proposed edits are previewed, validated, applied/rejected safely, and summarized.
+
+## Open decisions
+
+- Relationship interaction baseline: direct edge selection in Phase 1 vs inspectable relationship fallback until direct selection is straightforward.
+- Phase 2 editing model: global edit mode, per-action dialogs, inspector forms, or a combination.
+- Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
+
+## Decisions recorded
+
+- Package/tooling: single-package pnpm/Vite/TypeScript scaffold.
+- Phase 1 persistence: fixture fallback plus browser localStorage working graph.
+- Layout persistence semantics: explicit save layout, not autosave, for Phase 1.
+
+## Non-goals to preserve
+
+- Do not block Phase 1 on lineage, branching, deterministic replay, snapshots, authentication, collaboration, mobile layout, polished design system, complex persistence, or AI workflows.
+- Do not expose manual or agent mutations that bypass shared graph validity protection.
