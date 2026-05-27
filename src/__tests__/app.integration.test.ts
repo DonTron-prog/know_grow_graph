@@ -193,8 +193,8 @@ function selectedOptions(formElement: HTMLFormElement, name: string): string[] {
   return Array.from(field.selectedOptions).map((option) => option.value);
 }
 
-describe('app Phase 2 UI integration', () => {
-  it('gates editing and exercises dialog, multi-selection, detail edit, keyboard guard, undo, redo, and deletion flows', async () => {
+describe('app UI integration', () => {
+  it('gates editing and exercises manual edit plus agent question/proposal flows', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     localStorage.clear();
     currentCore = undefined;
@@ -300,5 +300,34 @@ describe('app Phase 2 UI integration', () => {
     clickButton('Reload graph');
     expect(document.body.textContent).toContain('Source: working');
     expect(document.body.textContent).not.toContain('Review Lens Updated');
+
+    const questionInput = document.querySelector<HTMLTextAreaElement>('#agent-question');
+    if (!questionInput) throw new Error('Expected agent question input.');
+    questionInput.value = 'What is Prompting connected to?';
+    submit(form('data-agent-form'));
+    expect(document.body.textContent).toContain('Grounded answer');
+    expect(document.body.textContent).toContain('Prompting');
+
+    const changeInput = document.querySelector<HTMLTextAreaElement>('#agent-change-request');
+    if (!changeInput) throw new Error('Expected agent change request input.');
+    changeInput.value = 'Add concept Agent Review type method notes Proposed by the agent helper.';
+    submit(form('data-agent-change-form'));
+    expect(document.body.textContent).toContain('Proposed graph change');
+    expect(document.body.textContent).toContain('Review before applying');
+
+    clickButton('Apply proposed change');
+    graph = savedGraph();
+    expect(graph.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'agent-review', label: 'Agent Review', type: 'method', notes: 'Proposed by the agent helper.', origin: 'agent' }),
+    ]));
+    expect(document.body.textContent).toContain('Applied agent change');
+
+    const nodeCountAfterAgentApply = graph.nodes.length;
+    const unsupportedChangeInput = document.querySelector<HTMLTextAreaElement>('#agent-change-request');
+    if (!unsupportedChangeInput) throw new Error('Expected agent change request input after apply.');
+    unsupportedChangeInput.value = 'Make the graph better somehow';
+    submit(form('data-agent-change-form'));
+    expect(document.body.textContent).toContain('Could not propose a graph change');
+    expect(savedGraph().nodes).toHaveLength(nodeCountAfterAgentApply);
   });
 });

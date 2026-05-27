@@ -1,12 +1,13 @@
 import { requireFinitePosition } from './positions';
 import { requireValidGraph } from './validation';
-import type { ConceptNode, GraphPosition, KnowledgeGraph, RelationshipEdge } from './types';
+import type { ConceptNode, GraphOrigin, GraphPosition, KnowledgeGraph, RelationshipEdge } from './types';
 
 export interface CreateConceptInput {
   label: string;
   type: string;
   notes?: string;
   position?: GraphPosition;
+  origin?: GraphOrigin;
 }
 
 export interface CreateRelationshipInput {
@@ -14,6 +15,7 @@ export interface CreateRelationshipInput {
   target: string;
   label: string;
   notes?: string;
+  origin?: GraphOrigin;
 }
 
 export interface CreateConceptRelationshipInput {
@@ -113,7 +115,7 @@ export function createConcept(graph: KnowledgeGraph, input: CreateConceptInput):
     ...graph,
     nodes: [
       ...graph.nodes,
-      { id, label, type, origin: 'user', notes: optionalTrimmed(input.notes), properties: {} },
+      { id, label, type, origin: input.origin ?? 'user', notes: optionalTrimmed(input.notes), properties: {} },
     ],
     layout: { ...(graph.layout ?? {}), [id]: position },
   }));
@@ -135,7 +137,7 @@ export function createRelationship(graph: KnowledgeGraph, input: CreateRelations
     ...graph,
     edges: [
       ...graph.edges,
-      { id, source, target, label, origin: 'user', notes: optionalTrimmed(input.notes), properties: {} },
+      { id, source, target, label, origin: input.origin ?? 'user', notes: optionalTrimmed(input.notes), properties: {} },
     ],
   }));
 

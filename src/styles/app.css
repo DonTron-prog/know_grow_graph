@@ -234,6 +234,12 @@ button.active {
   font-size: 0.85rem;
 }
 
+.agent-change-panel {
+  border-top: 1px solid #cbd5e1;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
 .agent-answer {
   background: #eff6ff;
   border: 1px solid #bfdbfe;

@@ -3,11 +3,13 @@ import type { Core, EventObject, NodeSingular, EdgeSingular } from 'cytoscape';
 import './styles/app.css';
 import { toCytoscapeElements } from './graph/cytoscapeAdapter';
 import { answerGraphQuestion } from './graph/agentQuestions';
+import { applyAgentGraphChangeProposal, createAgentGraphChangeProposal, describeAgentOperation } from './graph/agentChanges';
 import { canRedo, canUndo, emptyGraphHistory, redoGraph, rememberGraph, undoGraph } from './graph/history';
 import { connectedEdges, relationshipCounts } from './graph/metrics';
 import { createConcept, createConceptWithRelationships, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from './graph/mutations';
 import { loadGraph, saveGraph, saveLayout } from './graph/storage';
 import { validateGraph } from './graph/validation';
+import type { AgentGraphChangeProposal } from './graph/agentChanges';
 import type { GraphQuestionAnswer } from './graph/agentQuestions';
 import type { GraphHistory, GraphHistoryStep } from './graph/history';
 import type { GraphMutationResult } from './graph/mutations';
@@ -28,6 +30,9 @@ interface AppState {
   history: GraphHistory;
   agentQuestion: string;
   agentAnswer?: GraphQuestionAnswer;
+  agentChangeRequest: string;
+  agentProposal?: AgentGraphChangeProposal;
+  agentAppliedSummary?: string;
   message?: string;
   error?: string;
 }
@@ -58,6 +63,7 @@ let state: AppState = {
   warnings: validationWarnings(initialLoad.validation),
   history: emptyGraphHistory(),
   agentQuestion: '',
+  agentChangeRequest: '',
 };
 let cy: Core | undefined;
 
@@ -82,6 +88,9 @@ function loadIntoState(): void {
       history: emptyGraphHistory(),
       agentQuestion: state.agentQuestion,
       agentAnswer: undefined,
+      agentChangeRequest: state.agentChangeRequest,
+      agentProposal: undefined,
+      agentAppliedSummary: undefined,
       message: result.recoveryMessage ?? `Loaded ${result.source === 'working' ? 'saved working graph' : 'example Agentic AI graph'}.`,
       error: result.validation.errors.length > 0 ? result.validation.errors.map((error) => error.message).join(' ') : undefined,
     };
@@ -142,6 +151,10 @@ function renderShell(): void {
   app.querySelector<HTMLFormElement>('[data-agent-form]')?.addEventListener('submit', (event) => {
     event.preventDefault();
     askAgentQuestion();
+  });
+  app.querySelector<HTMLFormElement>('[data-agent-change-form]')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    proposeAgentChange();
   });
   app.querySelector<HTMLFormElement>('[data-concept-form]')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -355,7 +368,36 @@ function renderAgentPanel(): string {
         <h3>${answer.answered ? 'Grounded answer' : 'Cannot answer from graph'}</h3>
         <p>${escapeHtml(answer.answer)}</p>
         ${answer.evidence.length > 0 ? `<h4>Evidence</h4><ul>${answer.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
-      </section>` : '<p class="panel-note">Try a summary question, a concept label, or a relationship label.</p>'}`;
+      </section>` : '<p class="panel-note">Try a summary question, a concept label, or a relationship label.</p>'}
+    <section class="agent-change-panel" aria-label="Agent graph changes">
+      <h2>Agent graph changes</h2>
+      <p class="panel-note">Request a proposed graph change in plain language, review it, then apply it while content editing is active.</p>
+      <form class="agent-form" data-agent-change-form>
+        <label for="agent-change-request">Change request</label>
+        <textarea id="agent-change-request" rows="4" placeholder="Add concept Review Lens type method">${escapeHtml(state.agentChangeRequest)}</textarea>
+        <button type="submit">Propose graph change</button>
+      </form>
+      ${renderAgentProposal()}
+      ${state.agentAppliedSummary ? `<section class="agent-answer"><h3>Applied agent change</h3><p>${escapeHtml(state.agentAppliedSummary)}</p></section>` : ''}
+    </section>`;
+}
+
+function renderAgentProposal(): string {
+  const proposal = state.agentProposal;
+  if (!proposal) return '<p class="panel-note">Supported examples: “Add concept Review Lens type method”, “Connect Prompting to Evaluation as validates”, or “Rename concept Prompting to Prompt Design”.</p>';
+
+  return `
+    <section class="agent-answer" aria-live="polite">
+      <h3>Proposed graph change</h3>
+      <p>${escapeHtml(proposal.summary)}</p>
+      <h4>Review before applying</h4>
+      <ul>${proposal.operations.map((operation) => `<li>${escapeHtml(describeAgentOperation(operation))}</li>`).join('')}</ul>
+      ${state.editMode ? '<p class="panel-note">Proposal will be validated again before it replaces the working graph.</p>' : '<p class="panel-note">Turn on content editing before applying this proposal.</p>'}
+      <div class="dialog-actions">
+        <button type="button" data-action="apply-agent-proposal" ${state.editMode ? '' : 'disabled'}>Apply proposed change</button>
+        <button type="button" data-action="reject-agent-proposal">Reject proposal</button>
+      </div>
+    </section>`;
 }
 
 function mountGraph(viewport?: GraphViewport): void {
@@ -561,6 +603,12 @@ function handleAction(action: string | undefined): void {
     case 'ask-agent':
       askAgentQuestion();
       break;
+    case 'apply-agent-proposal':
+      applyAgentProposal();
+      break;
+    case 'reject-agent-proposal':
+      rejectAgentProposal();
+      break;
     case 'clear-selection':
       clearSelection();
       break;
@@ -594,6 +642,75 @@ function askAgentQuestion(): void {
   mountGraph(viewport);
 }
 
+function proposeAgentChange(): void {
+  const viewport = currentViewport();
+  const input = document.querySelector<HTMLTextAreaElement>('#agent-change-request');
+  const request = input?.value ?? state.agentChangeRequest;
+  state.agentChangeRequest = request;
+
+  try {
+    state.agentProposal = createAgentGraphChangeProposal(state.graph, request);
+    state.agentAppliedSummary = undefined;
+    state.message = 'Agent proposed a graph change for review.';
+    state.error = undefined;
+  } catch (error) {
+    state.agentProposal = undefined;
+    state.agentAppliedSummary = undefined;
+    state.message = undefined;
+    state.error = error instanceof Error ? error.message : 'Agent change proposal failed.';
+  }
+
+  renderShell();
+  mountGraph(viewport);
+}
+
+function applyAgentProposal(): void {
+  if (!state.agentProposal) {
+    state.error = 'No agent proposal is available to apply.';
+    renderShell();
+    mountGraph();
+    return;
+  }
+  if (!ensureEditing()) return;
+
+  const viewport = currentViewport();
+  const previousGraph = state.graph;
+  try {
+    const result = applyAgentGraphChangeProposal(state.graph, state.agentProposal);
+    const savedGraph = saveGraph(result.graph);
+    state.graph = savedGraph;
+    state.history = rememberGraph(state.history, previousGraph);
+    state.source = 'working';
+    state.layoutStatus = 'saved';
+    state.message = result.summary;
+    state.agentAppliedSummary = result.summary;
+    state.agentProposal = undefined;
+    state.agentAnswer = undefined;
+    state.error = undefined;
+    state.warnings = graphWarnings(savedGraph);
+    state.activeDialog = undefined;
+    state.selectedKind = result.changedKind;
+    state.selectedId = result.changedKind ? result.changedId : undefined;
+    state.selectedConceptIds = result.changedKind === 'concept' && result.changedId ? [result.changedId] : [];
+  } catch (error) {
+    state.message = undefined;
+    state.error = error instanceof Error ? `Agent proposed change was rejected: ${error.message}` : 'Agent proposed change was rejected.';
+  }
+
+  renderShell();
+  mountGraph(viewport);
+}
+
+function rejectAgentProposal(): void {
+  const viewport = currentViewport();
+  state.agentProposal = undefined;
+  state.agentAppliedSummary = undefined;
+  state.message = 'Agent proposal rejected. The graph was not changed.';
+  state.error = undefined;
+  renderShell();
+  mountGraph(viewport);
+}
+
 function ensureEditing(): boolean {
   if (state.editMode) return true;
   state.error = 'Enable content editing before changing the graph.';
@@ -623,6 +740,8 @@ function applyMutation(message: string, mutation: () => GraphMutationResult, sel
     state.error = undefined;
     state.warnings = graphWarnings(savedGraph);
     state.agentAnswer = undefined;
+    state.agentProposal = undefined;
+    state.agentAppliedSummary = undefined;
     state.activeDialog = undefined;
     state.selectedKind = selectKind;
     state.selectedId = selectKind ? result.changedId : undefined;
@@ -871,6 +990,8 @@ function restoreHistoryStep(step: GraphHistoryStep, message: string): void {
     state.error = undefined;
     state.warnings = graphWarnings(savedGraph);
     state.agentAnswer = undefined;
+    state.agentProposal = undefined;
+    state.agentAppliedSummary = undefined;
     reconcileSelection();
   } catch (error) {
     state.message = undefined;

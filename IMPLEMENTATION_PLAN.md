@@ -7,9 +7,9 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: behavioral specs `specs/01-graph-availability.md` through `specs/17-keyboard-operations.md`, `specs/README.md`, `frontend_PRD.md`, and `fixtures/source_graph.example.json`. The latest Phase 2 requirements include keyboard operations, shift-click multi-selection/relation creation, single creation dialogs, concept type choose-or-new entry, auto-connecting new concepts to selected concepts, and details-panel editing.
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, and saved positions.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
-- Present: validation commands are known passing for the current increment: focused app integration test, `pnpm test` (7 files, 33 tests), and `pnpm build`.
+- Present: validation commands are known passing for the current increment: `pnpm test` (8 files, 38 tests) and `pnpm build`.
 - Present: non-blocking recoverable graph warnings for layout/origin issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
-- Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent question panel.
+- Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent panel.
 - Present in Phase 2 UI: single concept/relationship creation dialogs, concept type datalist choose-or-new entry, ordered shift-click concept multi-selection with count/visual distinction and relationship endpoint defaults, optional selected-concept auto-connect as one atomic validated persisted undoable mutation, relationship direction/reverse controls, edit-mode details-panel forms for concept label/type/notes and relationship label/notes with source/target read-only, and guarded Delete/Backspace deletion outside editable controls.
 - Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
 - Still missing: manual browser smoke evidence for the Phase 2 UI flows.
@@ -85,24 +85,25 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Remaining: manual browser smoke evidence for these flows.
 
 - [ ] Partially completed: extend validity protection across all graph changes.
-  - Completed for loaded graphs, manual mutations, generic `saveGraph`, `saveLayout` finite-coordinate rejection, recoverable layout/origin warning surfacing, and fallback-position confidence coverage.
-  - Remaining: carry the same checks into future imported or agent-proposed changes.
-  - Acceptance for current manual mutations: every accepted mutation goes through validation and the displayed graph remains valid.
+  - Completed for loaded graphs, manual mutations, accepted agent proposals, generic `saveGraph`, `saveLayout` finite-coordinate rejection, recoverable layout/origin warning surfacing, and fallback-position confidence coverage.
+  - Remaining: carry the same checks into future imported changes.
+  - Acceptance for current manual mutations and accepted agent proposals: every accepted mutation goes through validation and the displayed graph remains valid.
 
 - [x] Implement Phase 3 grounded agent questions as a secondary feature.
   - Added a secondary agent question panel that answers from current graph content without mutating graph content.
   - Added renderer-neutral `answerGraphQuestion` coverage; tests and build pass for this increment.
 
-- [ ] Implement Phase 3 validated agent graph changes after manual editing is dependable.
-  - Do not start agent graph-change application until Phase 2 manual editing is dependable under the current dialog, multi-selection, details-panel, keyboard, undo/redo, and validity-protection requirements.
-  - Return proposed graph changes for user review.
-  - Validate proposals before application using the same graph validity layer.
-  - Apply valid proposals promptly, reject invalid proposals safely, and summarize applied changes in plain language.
+- [ ] Partially completed: implement Phase 3 validated agent graph changes after manual editing is dependable.
+  - Completed: renderer-neutral `agentChanges` proposal/apply helper exists.
+  - Completed: secondary agent panel supports plain-language proposal review, edit-mode-gated apply, and reject.
+  - Completed: accepted proposals use shared validation/save/history with agent origin; invalid or unsupported proposals are rejected safely.
+  - Completed: valid applied changes are summarized in plain language.
+  - Remaining: broaden supported proposal types and complete manual browser smoke after Phase 2 smoke coverage.
 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: focused app integration test passes; `pnpm test` passes with 7 files / 33 tests; `pnpm build` passes.
+  - Current handoff validation: `pnpm test` passes with 8 files / 38 tests; `pnpm build` passes.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin/state classes, and relationship counts.
@@ -112,12 +113,11 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - [x] Phase 2 app-level/jsdom UI tests: cover edit-mode gating, ordered shift-click multi-selection including visual class behavior, relationship dialog endpoint prefill/reverse direction, concept creation with selected-concept auto-connect, details-panel edits, Delete/Backspace focus guard and deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
 - [ ] Phase 2 manual browser smoke: confirm the same dialog, multi-selection, details-panel, keyboard, undo/redo, and localStorage flows in a real browser.
 - [x] Phase 3 question tests: renderer-neutral agent answers are graph-grounded and non-mutating.
-- [ ] Phase 3 graph-change tests later: proposed edits are previewed, validated, applied/rejected safely, and summarized.
+- [x] Phase 3 graph-change tests: `agentChanges` unit coverage and app integration coverage confirm proposal preview, validation, safe apply/reject behavior, and plain-language summaries.
 
 ## Open decisions
 
-- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, Phase 2 dialog/multi-selection/details-panel/keyboard flows, undo/redo controls, localStorage round trips, and the secondary agent question panel in the browser; automated jsdom coverage now covers the key Phase 2 UI paths.
-- Remaining Phase 3 agent graph changes: proposal preview, shared validation, safe apply/reject behavior, and plain-language summaries.
+- Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, Phase 2 dialog/multi-selection/details-panel/keyboard flows, undo/redo controls, localStorage round trips, and the secondary agent panel in the browser; automated jsdom coverage now covers the key Phase 2 UI paths.
 - Fixture completeness: decide whether relationship notes should be added now or remain optional when unavailable.
 
 ## Decisions recorded
