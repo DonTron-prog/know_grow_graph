@@ -137,7 +137,64 @@ button.active {
 .agent-panel {
   border-left: 1px solid #cbd5e1;
   border-right: 0;
+  color: #334155;
+}
+
+.panel-note {
   color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.agent-form {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.agent-form label,
+.agent-answer h4 {
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.agent-form textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #0f172a;
+  font: inherit;
+  min-height: 7rem;
+  padding: 0.65rem;
+  resize: vertical;
+  width: 100%;
+}
+
+.agent-answer {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  color: #1e3a8a;
+  padding: 0.75rem;
+}
+
+.agent-answer.unanswered {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
+}
+
+.agent-answer p {
+  line-height: 1.45;
+  margin: 0 0 0.75rem;
+}
+
+.agent-answer ul {
+  font-size: 0.85rem;
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
 }
 
 .graph-panel {

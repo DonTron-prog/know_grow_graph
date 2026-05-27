@@ -2,10 +2,12 @@ import cytoscape from 'cytoscape';
 import type { Core, EventObject, NodeSingular, EdgeSingular } from 'cytoscape';
 import './styles/app.css';
 import { toCytoscapeElements } from './graph/cytoscapeAdapter';
+import { answerGraphQuestion } from './graph/agentQuestions';
 import { connectedEdges, relationshipCounts } from './graph/metrics';
 import { createConcept, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from './graph/mutations';
 import { loadGraph, saveGraph, saveLayout } from './graph/storage';
 import { validateGraph } from './graph/validation';
+import type { GraphQuestionAnswer } from './graph/agentQuestions';
 import type { GraphMutationResult } from './graph/mutations';
 import type { GraphPosition, KnowledgeGraph } from './graph/types';
 
@@ -19,8 +21,15 @@ interface AppState {
   saving: boolean;
   editMode: boolean;
   warnings: string[];
+  agentQuestion: string;
+  agentAnswer?: GraphQuestionAnswer;
   message?: string;
   error?: string;
+}
+
+interface GraphViewport {
+  zoom: number;
+  pan: GraphPosition;
 }
 
 const appRoot = document.querySelector<HTMLDivElement>('#app');
@@ -41,6 +50,7 @@ let state: AppState = {
   saving: false,
   editMode: false,
   warnings: validationWarnings(initialLoad.validation),
+  agentQuestion: '',
 };
 let cy: Core | undefined;
 
@@ -60,6 +70,8 @@ function loadIntoState(): void {
       saving: false,
       editMode: state.editMode,
       warnings: recoveredFromInvalidSavedGraph ? [] : validationWarnings(result.validation),
+      agentQuestion: state.agentQuestion,
+      agentAnswer: undefined,
       message: result.recoveryMessage ?? `Loaded ${result.source === 'working' ? 'saved working graph' : 'example Agentic AI graph'}.`,
       error: result.validation.errors.length > 0 ? result.validation.errors.map((error) => error.message).join(' ') : undefined,
     };
@@ -105,15 +117,16 @@ function renderShell(): void {
         <div class="graph-panel">
           <div id="cy" aria-label="Concept graph"></div>
         </div>
-        <aside class="agent-panel" aria-label="Future agent panel">
-          <h2>Agent panel</h2>
-          <p>Disabled until graph review and manual editing are dependable.</p>
-        </aside>
+        <aside class="agent-panel" aria-label="Agent graph question panel">${renderAgentPanel()}</aside>
       </section>
     </main>`;
 
   app.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((button) => {
     button.addEventListener('click', () => handleAction(button.dataset.action));
+  });
+  app.querySelector<HTMLFormElement>('[data-agent-form]')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    askAgentQuestion();
   });
 }
 
@@ -173,6 +186,24 @@ function unavailableSelection(): string {
     <button type="button" data-action="clear-selection">Clear selection</button>`;
 }
 
+function renderAgentPanel(): string {
+  const answer = state.agentAnswer;
+  return `
+    <h2>Graph questions</h2>
+    <p class="panel-note">Ask about visible concepts or relationships. Answers are grounded in the current graph and do not change graph content.</p>
+    <form class="agent-form" data-agent-form>
+      <label for="agent-question">Question</label>
+      <textarea id="agent-question" rows="4" placeholder="What is Agent Loop connected to?">${escapeHtml(state.agentQuestion)}</textarea>
+      <button type="submit">Ask from graph</button>
+    </form>
+    ${answer ? `
+      <section class="agent-answer ${answer.answered ? '' : 'unanswered'}" aria-live="polite">
+        <h3>${answer.answered ? 'Grounded answer' : 'Cannot answer from graph'}</h3>
+        <p>${escapeHtml(answer.answer)}</p>
+        ${answer.evidence.length > 0 ? `<h4>Evidence</h4><ul>${answer.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+      </section>` : '<p class="panel-note">Try a summary question, a concept label, or a relationship label.</p>'}`;
+}
+
 function updateStatusStrip(): void {
   const statusStrip = document.querySelector<HTMLElement>('.status-strip');
   if (!statusStrip) return;
@@ -186,7 +217,7 @@ function updateStatusStrip(): void {
     ${state.warnings.length > 0 ? `<span>${state.warnings.length} warning${state.warnings.length === 1 ? '' : 's'}</span>` : ''}`;
 }
 
-function mountGraph(): void {
+function mountGraph(viewport?: GraphViewport): void {
   const container = document.querySelector<HTMLDivElement>('#cy');
   if (!container) return;
 
@@ -195,7 +226,7 @@ function mountGraph(): void {
     cy = cytoscape({
       container,
       elements: toCytoscapeElements(state.graph),
-      layout: { name: 'preset', fit: true, padding: 50 },
+      layout: { name: 'preset', fit: viewport ? false : true, padding: 50 },
       wheelSensitivity: 0.2,
       autoungrabify: !state.editMode,
       style: [
@@ -259,6 +290,10 @@ function mountGraph(): void {
         mountGraph();
       }
     });
+    if (viewport) {
+      cy.zoom(viewport.zoom);
+      cy.pan(viewport.pan);
+    }
     if (state.selectedId) cy.getElementById(state.selectedId).select();
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'Graph rendering failed.';
@@ -266,28 +301,36 @@ function mountGraph(): void {
   }
 }
 
+function currentViewport(): GraphViewport | undefined {
+  if (!cy) return undefined;
+  return { zoom: cy.zoom(), pan: cy.pan() };
+}
+
 function selectConcept(node: NodeSingular): void {
+  const viewport = currentViewport();
   state.selectedId = node.id();
   state.selectedKind = 'concept';
   renderShell();
-  mountGraph();
+  mountGraph(viewport);
   cy?.getElementById(state.selectedId).select();
 }
 
 function selectRelationship(edge: EdgeSingular): void {
+  const viewport = currentViewport();
   state.selectedId = edge.id();
   state.selectedKind = 'relationship';
   renderShell();
-  mountGraph();
+  mountGraph(viewport);
   cy?.getElementById(state.selectedId).select();
 }
 
 function clearSelection(): void {
+  const viewport = currentViewport();
   state.selectedId = undefined;
   state.selectedKind = undefined;
   cy?.elements().unselect();
   renderShell();
-  mountGraph();
+  mountGraph(viewport);
 }
 
 function handleAction(action: string | undefined): void {
@@ -325,10 +368,37 @@ function handleAction(action: string | undefined): void {
     case 'delete-selected':
       deleteSelectedFromPrompt();
       break;
+    case 'ask-agent':
+      askAgentQuestion();
+      break;
     case 'clear-selection':
       clearSelection();
       break;
   }
+}
+
+function askAgentQuestion(): void {
+  const viewport = currentViewport();
+  const input = document.querySelector<HTMLTextAreaElement>('#agent-question');
+  const question = input?.value ?? state.agentQuestion;
+  state.agentQuestion = question;
+
+  try {
+    state.agentAnswer = answerGraphQuestion(state.graph, question);
+    state.message = state.agentAnswer.answered ? 'Answered from the current graph.' : undefined;
+    state.error = undefined;
+  } catch (error) {
+    state.agentAnswer = {
+      question,
+      answered: false,
+      answer: 'The graph question helper failed, but the graph remains available for review.',
+      evidence: [],
+    };
+    state.error = error instanceof Error ? error.message : state.agentAnswer.answer;
+  }
+
+  renderShell();
+  mountGraph(viewport);
 }
 
 function ensureEditing(): boolean {

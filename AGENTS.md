@@ -6,4 +6,5 @@ Run commands:
 - `pnpm install`
 - `pnpm dev`
 - `pnpm test`
+- `pnpm test <path>` for focused Vitest files
 - `pnpm build`
