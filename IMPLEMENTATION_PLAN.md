@@ -8,13 +8,14 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, saved positions, first-class `sourceRefs` examples on concepts/relationships, and an unavailable source-origin example.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
 - No `src/lib` directory exists. Current app/UI code is in `src/app.ts`, renderer-neutral graph logic is in `src/graph/*`, styles are in `src/styles/app.css`, and app integration coverage is in `src/__tests__/app.integration.test.ts`.
-- Present: validation commands are known passing for the current P1 graph visual distinction increment: focused `pnpm test src/__tests__/app.integration.test.ts` passed (1 file, 2 tests), full `pnpm test` passed (9 files, 46 tests), and `pnpm build` passed with only the existing Vite chunk-size warning.
+- Present: validation commands are known passing for the current P1 visual distinction and agent panel prominence increments: focused `pnpm test src/__tests__/app.integration.test.ts` passed (1 file, 2 tests), full `pnpm test` passed (9 files, 46 tests), and `pnpm build` passed with only the existing Vite chunk-size warning.
 - Present: non-blocking recoverable graph warnings for layout/origin/source-reference issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
-- Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector with source context/unavailable-state rendering, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent panel.
+- Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector with source context/unavailable-state rendering, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary collapsed-by-default Phase 3 agent panel.
 - Present in Phase 2 UI: single concept/relationship creation dialogs, concept type datalist choose-or-new entry, ordered shift-click concept multi-selection with count/visual distinction and relationship endpoint defaults, optional selected-concept auto-connect as one atomic validated persisted undoable mutation, relationship direction/reverse controls, edit-mode details-panel forms for concept label/type/notes and relationship label/notes with source/target read-only, and guarded Delete/Backspace deletion outside editable controls.
-- Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, Reload graph UI localStorage round trip after deletion, and basic agent question/proposal flows. Current coverage also checks P1 visual selectors, hover class behavior, node/edge last-changed classes, and warning-related classes.
+- Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, Reload graph UI localStorage round trip after deletion, and basic agent question/proposal flows. Current coverage also checks P1 visual selectors, hover class behavior, node/edge last-changed classes, warning-related classes, default collapsed/secondary agent behavior, and agent panel expansion during agent use.
 - Present: P0 graph insights/filtering controls with graph-derived importance scores/levels, type/importance/community filters, visible-vs-total counts, full-graph restore, hidden-without-deletion behavior, coherent recomputation after accepted manual or agent graph changes, and community visual distinction via community data/classes/color.
 - Present: P1 graph visual distinction now covers source/user/agent/imported/unknown origin styling for nodes and edges, selected/multi-selected/hover states, node/edge last-changed and warning-related classes/styles, and a compact in-graph legend.
+- Present: P1 agent panel prominence has been reduced. Secondary agent tools are collapsed by default, the graph area has more priority through a narrower muted agent panel, and agent question/change groups open only after use.
 - Still missing: observable saving feedback and manual browser smoke evidence for the Phase 1/2/3 UI flows, including browser smoke for filters and visual-state comprehension.
 - Present: `specs/10-manual-editing.md` requires current-session undo/redo for recent accepted manual edits without historical replay, branching, reload persistence, or audit-grade provenance.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
@@ -54,7 +55,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - [x] Implement the focused desktop workbench shell.
   - Provides the core toolbar/action area, primary Cytoscape graph view, inspector, and minimal activity/status feedback.
   - Keeps graph review central and avoids a general dashboard feel.
-  - Current shell is sufficient for initial fixture review and iteration, but the always-visible agent panel should be reduced until active.
+  - Current shell is sufficient for initial fixture review and iteration, with the secondary agent panel collapsed and visually muted until active.
 
 - [x] P0: Implement source grounding in graph data conventions and the inspector.
   - Completed: concepts and relationships support first-class `sourceRefs` for readable source name/location/excerpt/reference context.
@@ -81,10 +82,12 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Completed: a compact graph legend explains origin, last-changed, and warning-related visual states without turning the app into a general dashboard.
   - Evidence: focused `pnpm test src/__tests__/app.integration.test.ts` passed (1 file, 2 tests); full `pnpm test` passed (9 files, 46 tests); `pnpm build` passed with only the existing Vite chunk-size warning.
 
-- [ ] P1: Reduce agent panel prominence until agent work is active.
-  - Make the graph and inspector remain visually dominant before users intentionally use agent features.
-  - Consider collapsed/default-secondary presentation, activation affordance, or layout changes that keep Phase 3 panels from distracting from Phase 1 graph review.
-  - Keep current agent functionality accessible and secondary.
+- [x] P1: Reduce agent panel prominence until agent work is active.
+  - Completed: secondary agent tools are collapsed by default so Phase 3 controls do not compete with initial graph review.
+  - Completed: the graph area is given more priority through a narrower, muted agent panel.
+  - Completed: agent question/change groups open only after users use those agent features.
+  - Completed: current agent functionality remains accessible and secondary.
+  - Evidence: focused `pnpm test src/__tests__/app.integration.test.ts` passed (1 file, 2 tests); full `pnpm test` passed (9 files, 46 tests); `pnpm build` passed with only the existing Vite chunk-size warning.
 
 - [ ] P1: Strengthen layout, navigation, and focus validation.
   - Current implementation has baseline rendering, labels, saved coordinates, Cytoscape pan/zoom affordances, Fit, Reset layout, selection, multi-selection, clear-selection, and unavailable-selection reconciliation.
@@ -158,21 +161,20 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
 - [x] Source-grounding tests: `sourceRefs` validation/preservation, inspector rendering for available context, unavailable-context messaging for source-origin elements, and preservation through simple manual/agent edits.
 - [x] Graph insights/filtering tests: cover degree-normalized importance scores/levels, type/community/importance filters, community visual data/classes/color, visible-vs-total counts, full restore, mutation while filtered, and no graph-content deletion.
-- [ ] Partially covered visual/workbench tests or smoke: automated jsdom coverage checks P1 visual selectors, hover class behavior, last-changed node/edge classes, and warning-related classes; remaining browser smoke should confirm visual comprehension in a real browser and agent panel secondary/collapsed behavior.
+- [ ] Partially covered visual/workbench tests or smoke: automated jsdom coverage checks P1 visual selectors, hover class behavior, last-changed node/edge classes, warning-related classes, default collapsed/secondary agent behavior, and agent panel expansion during agent use; remaining browser smoke should confirm visual comprehension and secondary agent-panel behavior in a real browser.
 - [ ] Loading/saving feedback tests: content-save feedback, layout-save feedback, malformed saved-data UI recovery, save-failure UX, and render timing if localStorage persistence remains synchronous.
-- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows, source-context rendering, P0 filter behavior, and P1 visual selector/state behavior; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, source context, filters, visual-state comprehension, and recoverable-error usability.
+- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows, source-context rendering, P0 filter behavior, P1 visual selector/state behavior, and default collapsed/secondary agent behavior with expansion during agent use; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, source context, filters, visual-state comprehension, and recoverable-error usability.
 - [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, current-session undo/redo history, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
 - [x] Phase 2 app-level/jsdom UI tests: cover edit-mode gating, ordered shift-click multi-selection including visual class behavior, relationship dialog endpoint prefill/reverse direction, concept creation with selected-concept auto-connect, details-panel edits, Delete/Backspace focus guard and deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
 - [ ] Phase 2 manual browser smoke: confirm the same dialog, multi-selection, details-panel, keyboard, undo/redo, deletion, drag/save layout, and localStorage flows in a real browser.
 - [x] Phase 3 question tests: renderer-neutral agent answers are graph-grounded and non-mutating.
 - [x] Phase 3 graph-change tests: `agentChanges` unit coverage and app integration coverage confirm proposal preview, validation, safe apply/reject behavior, and plain-language summaries for the currently supported subset.
-- [ ] Phase 3 expansion tests: source-aware answers using `sourceRefs`, broader proposal parsing, strict proposal preflight if needed, and agent panel secondary UX.
+- [ ] Phase 3 expansion tests: source-aware answers using `sourceRefs`, broader proposal parsing, and strict proposal preflight if needed.
 
 ## Open decisions
 
 - Graph insight UX: decide how visibly to expose community names/labels versus using communities mainly for color, layout, and filters.
 - Repositioning mode: decide whether edit-mode dragging is sufficient or whether a distinct layout/reposition mode is needed for safer review-mode behavior.
-- Agent panel prominence: decide on collapsed/default-secondary presentation versus the current always-visible panel.
 - Import scope: decide whether imported graph changes are in scope now or explicitly deferred.
 - Manual smoke gaps: confirm desktop edit-mode flow, drag behavior, Phase 2 dialog/multi-selection/details-panel/keyboard flows, undo/redo controls, localStorage round trips, source/filter flows, and the secondary agent panel in the browser.
 
@@ -188,6 +190,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Product framing: current work centers on one working source-derived concept map that users reshape to match their mental model; multiple competing representations remain out of scope.
 - Graph insights: importance is degree normalized to max degree for the current graph; explicit community metadata is used when present, otherwise connected components are used only when useful. Keep room for imported or AI-generated metadata later.
 - Source grounding: use first-class `sourceRefs` on concepts and relationships; preserve refs for simple transformations where practical; missing or malformed refs are non-fatal warnings and should not block useful manual graph reshaping.
+- Agent panel prominence: use a collapsed-by-default, visually muted secondary agent panel; expand question/change groups after users use those agent features.
 
 ## Non-goals to preserve
 

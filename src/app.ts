@@ -525,31 +525,45 @@ function relationshipCountLabel(visibility = currentGraphVisibility()): string {
 
 function renderAgentPanel(): string {
   const answer = state.agentAnswer;
+  const questionActive = Boolean(answer || state.agentQuestion.trim());
+  const changeActive = Boolean(state.agentProposal || state.agentAppliedSummary || state.agentChangeRequest.trim());
   return `
-    <h2>Graph questions</h2>
-    <p class="panel-note">Ask about visible concepts or relationships. Answers are grounded in the current graph and do not change graph content.</p>
-    <form class="agent-form" data-agent-form>
-      <label for="agent-question">Question</label>
-      <textarea id="agent-question" rows="4" placeholder="What is Agent Loop connected to?">${escapeHtml(state.agentQuestion)}</textarea>
-      <button type="submit">Ask from graph</button>
-    </form>
-    ${answer ? `
-      <section class="agent-answer ${answer.answered ? '' : 'unanswered'}" aria-live="polite">
-        <h3>${answer.answered ? 'Grounded answer' : 'Cannot answer from graph'}</h3>
-        <p>${escapeHtml(answer.answer)}</p>
-        ${answer.evidence.length > 0 ? `<h4>Evidence</h4><ul>${answer.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
-      </section>` : '<p class="panel-note">Try a summary question, a concept label, or a relationship label.</p>'}
-    <section class="agent-change-panel" aria-label="Agent graph changes">
-      <h2>Agent graph changes</h2>
-      <p class="panel-note">Request a proposed graph change in plain language, review it, then apply it while content editing is active.</p>
-      <form class="agent-form" data-agent-change-form>
-        <label for="agent-change-request">Change request</label>
-        <textarea id="agent-change-request" rows="4" placeholder="Add concept Review Lens type method">${escapeHtml(state.agentChangeRequest)}</textarea>
-        <button type="submit">Propose graph change</button>
+    <h2>Secondary agent tools</h2>
+    <p class="panel-note">Collapsed until you use them so graph review and inspection stay primary.</p>
+    <details class="agent-feature-group" ${questionActive ? 'open' : ''}>
+      <summary>
+        <span>Graph questions</span>
+        <small>Ask from current graph content</small>
+      </summary>
+      <p class="panel-note">Ask about visible concepts or relationships. Answers are grounded in the current graph and do not change graph content.</p>
+      <form class="agent-form" data-agent-form>
+        <label for="agent-question">Question</label>
+        <textarea id="agent-question" rows="4" placeholder="What is Agent Loop connected to?">${escapeHtml(state.agentQuestion)}</textarea>
+        <button type="submit">Ask from graph</button>
       </form>
-      ${renderAgentProposal()}
-      ${state.agentAppliedSummary ? `<section class="agent-answer"><h3>Applied agent change</h3><p>${escapeHtml(state.agentAppliedSummary)}</p></section>` : ''}
-    </section>`;
+      ${answer ? `
+        <section class="agent-answer ${answer.answered ? '' : 'unanswered'}" aria-live="polite">
+          <h3>${answer.answered ? 'Grounded answer' : 'Cannot answer from graph'}</h3>
+          <p>${escapeHtml(answer.answer)}</p>
+          ${answer.evidence.length > 0 ? `<h4>Evidence</h4><ul>${answer.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+        </section>` : '<p class="panel-note">Try a summary question, a concept label, or a relationship label.</p>'}
+    </details>
+    <details class="agent-feature-group" ${changeActive ? 'open' : ''}>
+      <summary>
+        <span>Agent graph changes</span>
+        <small>Review proposals before applying</small>
+      </summary>
+      <section class="agent-change-panel" aria-label="Agent graph changes">
+        <p class="panel-note">Request a proposed graph change in plain language, review it, then apply it while content editing is active.</p>
+        <form class="agent-form" data-agent-change-form>
+          <label for="agent-change-request">Change request</label>
+          <textarea id="agent-change-request" rows="4" placeholder="Add concept Review Lens type method">${escapeHtml(state.agentChangeRequest)}</textarea>
+          <button type="submit">Propose graph change</button>
+        </form>
+        ${renderAgentProposal()}
+        ${state.agentAppliedSummary ? `<section class="agent-answer"><h3>Applied agent change</h3><p>${escapeHtml(state.agentAppliedSummary)}</p></section>` : ''}
+      </section>
+    </details>`;
 }
 
 function renderAgentProposal(): string {

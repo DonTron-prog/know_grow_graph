@@ -239,6 +239,11 @@ describe('app UI integration', () => {
 
     expect(document.body.textContent).toContain('Review mode');
     expect(document.body.textContent).toContain('Full graph visible');
+    expect(document.body.textContent).toContain('Secondary agent tools');
+    const initialAgentGroups = document.querySelectorAll<HTMLDetailsElement>('.agent-feature-group');
+    expect(initialAgentGroups).toHaveLength(2);
+    expect(initialAgentGroups[0].hasAttribute('open')).toBe(false);
+    expect(initialAgentGroups[1].hasAttribute('open')).toBe(false);
     expect(core().nodeElements).toHaveLength(10);
     expect(core().getElementById('agent-loop')?.definition.data.importanceLevel).toBe('high');
     expect(latestStyleSelectors).toEqual(expect.arrayContaining([
@@ -386,6 +391,7 @@ describe('app UI integration', () => {
     submit(form('data-agent-form'));
     expect(document.body.textContent).toContain('Grounded answer');
     expect(document.body.textContent).toContain('Prompting');
+    expect(document.querySelectorAll<HTMLDetailsElement>('.agent-feature-group')[0].hasAttribute('open')).toBe(true);
 
     const changeInput = document.querySelector<HTMLTextAreaElement>('#agent-change-request');
     if (!changeInput) throw new Error('Expected agent change request input.');
@@ -393,6 +399,7 @@ describe('app UI integration', () => {
     submit(form('data-agent-change-form'));
     expect(document.body.textContent).toContain('Proposed graph change');
     expect(document.body.textContent).toContain('Review before applying');
+    expect(document.querySelectorAll<HTMLDetailsElement>('.agent-feature-group')[1].hasAttribute('open')).toBe(true);
 
     clickButton('Apply proposed change');
     graph = savedGraph();
