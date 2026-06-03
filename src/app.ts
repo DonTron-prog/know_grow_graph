@@ -5,7 +5,7 @@ import { toCytoscapeElements } from './graph/cytoscapeAdapter';
 import { answerGraphQuestion } from './graph/agentQuestions';
 import { applyAgentGraphChangeProposal, createAgentGraphChangeProposal, describeAgentOperation } from './graph/agentChanges';
 import { canRedo, canUndo, emptyGraphHistory, redoGraph, rememberGraph, undoGraph } from './graph/history';
-import { connectedEdges, relationshipCounts } from './graph/metrics';
+import { connectedEdges, filteredGraph, graphInsights, graphVisibility, relationshipCounts } from './graph/metrics';
 import { createConcept, createConceptWithRelationships, createRelationship, deleteConcept, deleteRelationship, moveConcept, updateConcept, updateRelationship } from './graph/mutations';
 import { loadGraph, saveGraph, saveLayout } from './graph/storage';
 import { validateGraph } from './graph/validation';
@@ -13,6 +13,7 @@ import type { AgentGraphChangeProposal } from './graph/agentChanges';
 import type { GraphQuestionAnswer } from './graph/agentQuestions';
 import type { GraphHistory, GraphHistoryStep } from './graph/history';
 import type { GraphMutationResult } from './graph/mutations';
+import type { GraphFilters } from './graph/metrics';
 import type { GraphOrigin, GraphPosition, KnowledgeGraph, SourceReference } from './graph/types';
 
 interface AppState {
@@ -21,6 +22,7 @@ interface AppState {
   selectedId?: string;
   selectedKind?: 'concept' | 'relationship';
   selectedConceptIds: string[];
+  filters: GraphFilters;
   activeDialog?: 'concept' | 'relationship';
   layoutStatus: 'saved' | 'unsaved';
   loading: boolean;
@@ -60,6 +62,7 @@ let state: AppState = {
   saving: false,
   editMode: false,
   selectedConceptIds: [],
+  filters: {},
   warnings: validationWarnings(initialLoad.validation),
   history: emptyGraphHistory(),
   agentQuestion: '',
@@ -83,6 +86,7 @@ function loadIntoState(): void {
       saving: false,
       editMode: state.editMode,
       selectedConceptIds: [],
+      filters: state.filters,
       activeDialog: undefined,
       warnings: recoveredFromInvalidSavedGraph ? [] : validationWarnings(result.validation),
       history: emptyGraphHistory(),
@@ -102,6 +106,7 @@ function loadIntoState(): void {
 }
 
 function renderShell(): void {
+  const visibility = currentGraphVisibility();
   app.innerHTML = `
     <main class="workbench">
       <header class="toolbar" aria-label="Graph actions">
@@ -122,8 +127,8 @@ function renderShell(): void {
         <button type="button" data-action="delete-selected">Delete selected</button>
       </header>
       <section class="status-strip" aria-live="polite">
-        <span>${state.loading ? 'Loading graph…' : `${state.graph.nodes.length} concepts`}</span>
-        <span>${state.graph.edges.length} relationships</span>
+        <span>${state.loading ? 'Loading graph…' : conceptCountLabel(visibility)}</span>
+        <span>${relationshipCountLabel(visibility)}</span>
         <span>${selectionCount()} selected</span>
         <span>Layout ${state.layoutStatus}</span>
         <span>Source: ${state.source}</span>
@@ -135,6 +140,7 @@ function renderShell(): void {
       ${state.message ? `<p class="message">${escapeHtml(state.message)}</p>` : ''}
       ${renderWarnings()}
       ${state.error ? `<p class="error" role="alert">${escapeHtml(state.error)} Continue reviewing the visible graph, or retry loading. <button type="button" data-action="reload">Retry</button></p>` : ''}
+      ${renderInsightControls(visibility)}
       ${renderActiveDialog()}
       <section class="workspace">
         <aside class="inspector" aria-label="Graph inspector">${renderInspector()}</aside>
@@ -148,6 +154,10 @@ function renderShell(): void {
   app.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((button) => {
     button.addEventListener('click', () => handleAction(button.dataset.action));
   });
+  app.querySelector<HTMLFormElement>('[data-filter-form]')?.addEventListener('change', (event) => {
+    updateGraphFilters(event.currentTarget as HTMLFormElement);
+  });
+  app.querySelector<HTMLFormElement>('[data-filter-form]')?.addEventListener('submit', (event) => event.preventDefault());
   app.querySelector<HTMLFormElement>('[data-agent-form]')?.addEventListener('submit', (event) => {
     event.preventDefault();
     askAgentQuestion();
@@ -174,6 +184,58 @@ function renderShell(): void {
   });
 }
 
+function renderInsightControls(visibility = currentGraphVisibility()): string {
+  const insights = graphInsights(state.graph);
+  const active = visibility.active;
+  const activeFilters = [
+    state.filters.type ? `type ${state.filters.type}` : undefined,
+    state.filters.community ? `community ${state.filters.community}` : undefined,
+    state.filters.minImportanceScore ? `importance ≥ ${importanceThresholdLabel(state.filters.minImportanceScore)}` : undefined,
+  ].filter(Boolean);
+
+  return `
+    <section class="insight-controls" aria-label="Graph insights and filters">
+      <div>
+        <strong>Graph insights</strong>
+        <span>${active ? `${visibility.visibleConceptCount}/${visibility.totalConceptCount} concepts visible` : 'Full graph visible'}</span>
+      </div>
+      <form class="filter-form" data-filter-form>
+        <label>Type
+          <select name="type">
+            <option value="">All types</option>
+            ${insights.types.map((type) => `<option value="${escapeHtml(type)}" ${state.filters.type === type ? 'selected' : ''}>${escapeHtml(type)}</option>`).join('')}
+          </select>
+        </label>
+        <label>Importance
+          <select name="minImportanceScore">
+            ${renderImportanceThresholdOption(0, 'All concepts')}
+            ${renderImportanceThresholdOption(0.34, 'Medium and high')}
+            ${renderImportanceThresholdOption(0.66, 'High only')}
+          </select>
+        </label>
+        <label>Community
+          <select name="community" ${insights.communities.length === 0 ? 'disabled' : ''}>
+            <option value="">${insights.communities.length === 0 ? 'No community metadata' : 'All communities'}</option>
+            ${insights.communities.map((community) => `<option value="${escapeHtml(community)}" ${state.filters.community === community ? 'selected' : ''}>${escapeHtml(community)}</option>`).join('')}
+          </select>
+        </label>
+      </form>
+      <div class="filter-summary">
+        ${active ? `<span>Filtered by ${escapeHtml(activeFilters.join(', '))}.</span> <button type="button" data-action="restore-full-graph">Return to full graph</button>` : '<span>Use filters to hide clutter without deleting graph content.</span>'}
+      </div>
+    </section>`;
+}
+
+function renderImportanceThresholdOption(value: number, label: string): string {
+  return `<option value="${value}" ${Math.abs((state.filters.minImportanceScore ?? 0) - value) < 0.001 ? 'selected' : ''}>${label}</option>`;
+}
+
+function importanceThresholdLabel(value: number): string {
+  if (value >= 0.66) return 'high';
+  if (value >= 0.34) return 'medium';
+  return 'all';
+}
+
 function renderInspector(): string {
   if (state.selectedKind === 'concept' && state.selectedConceptIds.length > 1) {
     const selectedConcepts = state.selectedConceptIds
@@ -193,6 +255,7 @@ function renderInspector(): string {
     const concept = state.graph.nodes.find((node) => node.id === state.selectedId);
     if (!concept) return unavailableSelection();
     const counts = relationshipCounts(state.graph);
+    const insight = graphInsights(state.graph).concepts.get(concept.id);
     const relationships = connectedEdges(state.graph, concept.id);
     const readonlyDetails = `
       <dl>
@@ -200,6 +263,8 @@ function renderInspector(): string {
         <dt>Type</dt><dd>${escapeHtml(concept.type)}</dd>
         <dt>Origin</dt><dd>${escapeHtml(concept.origin ?? 'unknown')}</dd>
         <dt>Connected concepts</dt><dd>${counts.get(concept.id) ?? 0}</dd>
+        <dt>Importance</dt><dd>${escapeHtml(insight ? `${insight.importanceLevel} (${Math.round(insight.importanceScore * 100)}%)` : 'unknown')}</dd>
+        <dt>Community</dt><dd>${escapeHtml(insight?.community ?? 'No community metadata')}</dd>
         <dt>Notes</dt><dd>${escapeHtml(concept.notes ?? 'No notes available.')}</dd>
       </dl>`;
     const editDetails = state.editMode ? `
@@ -254,14 +319,40 @@ function renderInspector(): string {
 
   return `
     <h2>Graph summary</h2>
+    ${renderGraphSummaryDetails()}
+    ${renderStructuralInsightSummary()}
+    <p>Select a concept or relationship to inspect details.</p>`;
+}
+
+function renderGraphSummaryDetails(): string {
+  const visibility = currentGraphVisibility();
+  return `
     <dl>
       <dt>Name</dt><dd>${escapeHtml(state.graph.name)}</dd>
       <dt>ID</dt><dd>${escapeHtml(state.graph.graphId)}</dd>
-      <dt>Concepts</dt><dd>${state.graph.nodes.length}</dd>
-      <dt>Relationships</dt><dd>${state.graph.edges.length}</dd>
+      <dt>Concepts</dt><dd>${conceptCountLabel(visibility)}</dd>
+      <dt>Relationships</dt><dd>${relationshipCountLabel(visibility)}</dd>
       <dt>Layout</dt><dd>${state.layoutStatus}</dd>
-    </dl>
-    <p>Select a concept or relationship to inspect details.</p>`;
+    </dl>`;
+}
+
+function renderStructuralInsightSummary(): string {
+  const insights = graphInsights(state.graph);
+  const ranked = state.graph.nodes
+    .map((node) => ({ node, insight: insights.concepts.get(node.id) }))
+    .sort((left, right) => (right.insight?.relationshipCount ?? 0) - (left.insight?.relationshipCount ?? 0) || left.node.label.localeCompare(right.node.label))
+    .slice(0, 3);
+  const communities = insights.communities.length > 0 ? insights.communities.join(', ') : 'No community metadata available.';
+
+  return `
+    <section class="insight-summary" aria-label="Structural insight summary">
+      <h3>Structural insights</h3>
+      <p class="panel-note">Importance is graph-derived from each concept's connectivity relative to the most connected concept.</p>
+      <ul>
+        ${ranked.map(({ node, insight }) => `<li>${escapeHtml(node.label)} — ${insight?.relationshipCount ?? 0} relationships, ${escapeHtml(insight?.importanceLevel ?? 'unknown')} importance</li>`).join('')}
+      </ul>
+      <p class="panel-note">Communities: ${escapeHtml(communities)}</p>
+    </section>`;
 }
 
 function renderSourceContext(origin: GraphOrigin | undefined, sourceRefs: SourceReference[] | undefined): string {
@@ -385,6 +476,23 @@ function selectionCount(): number {
   return state.selectedKind === 'concept' ? state.selectedConceptIds.length : state.selectedId ? 1 : 0;
 }
 
+function currentGraphVisibility() {
+  const insights = graphInsights(state.graph);
+  return graphVisibility(state.graph, state.filters, insights);
+}
+
+function visibleGraphForFilters(): KnowledgeGraph {
+  return filteredGraph(state.graph, currentGraphVisibility());
+}
+
+function conceptCountLabel(visibility = currentGraphVisibility()): string {
+  return visibility.active ? `${visibility.visibleConceptCount}/${visibility.totalConceptCount} concepts visible` : `${visibility.totalConceptCount} concepts`;
+}
+
+function relationshipCountLabel(visibility = currentGraphVisibility()): string {
+  return visibility.active ? `${visibility.visibleRelationshipCount}/${visibility.totalRelationshipCount} relationships visible` : `${visibility.totalRelationshipCount} relationships`;
+}
+
 function renderAgentPanel(): string {
   const answer = state.agentAnswer;
   return `
@@ -432,6 +540,15 @@ function renderAgentProposal(): string {
     </section>`;
 }
 
+function visibleCytoscapeElements() {
+  const visibility = currentGraphVisibility();
+  return toCytoscapeElements(state.graph).filter((element) => {
+    if (element.group === 'nodes') return visibility.visibleConceptIds.has(String(element.data.id));
+    if (element.group === 'edges') return visibility.visibleRelationshipIds.has(String(element.data.id));
+    return true;
+  });
+}
+
 function mountGraph(viewport?: GraphViewport): void {
   const container = document.querySelector<HTMLDivElement>('#cy');
   if (!container) return;
@@ -440,7 +557,7 @@ function mountGraph(viewport?: GraphViewport): void {
     cy?.destroy();
     cy = cytoscape({
       container,
-      elements: toCytoscapeElements(state.graph),
+      elements: visibleCytoscapeElements(),
       layout: { name: 'preset', fit: viewport ? false : true, padding: 50 },
       wheelSensitivity: 0.2,
       autoungrabify: !state.editMode,
@@ -463,6 +580,13 @@ function mountGraph(viewport?: GraphViewport): void {
           },
         },
         { selector: 'node.origin-source', style: { 'background-color': '#e0f2fe', 'border-color': '#0369a1' } },
+        { selector: 'node.origin-user', style: { 'background-color': '#f0fdf4', 'border-color': '#15803d' } },
+        { selector: 'node.origin-agent', style: { 'background-color': '#fef3c7', 'border-color': '#b45309' } },
+        { selector: 'node.origin-imported', style: { 'background-color': '#ede9fe', 'border-color': '#7c3aed' } },
+        { selector: 'node.has-community', style: { 'background-color': 'data(communityColor)' } },
+        { selector: 'node.importance-high', style: { 'border-width': '5px', 'font-weight': 700 } },
+        { selector: 'node.importance-medium', style: { 'border-width': '3px' } },
+        { selector: 'node.importance-isolated', style: { opacity: 0.72, 'border-style': 'dashed' } },
         { selector: 'node:selected', style: { 'background-color': '#fde68a', 'border-color': '#92400e', 'border-width': '4px' } },
         { selector: 'node.multi-selected', style: { 'background-color': '#bbf7d0', 'border-color': '#15803d', 'border-width': '5px' } },
         { selector: 'node.hovered', style: { 'border-width': '5px', 'border-color': '#2563eb' } },
@@ -644,9 +768,63 @@ function handleAction(action: string | undefined): void {
     case 'clear-selection':
       clearSelection();
       break;
+    case 'restore-full-graph':
+      restoreFullGraphView();
+      break;
     case 'close-dialog':
       closeDialog();
       break;
+  }
+}
+
+function updateGraphFilters(formElement: HTMLFormElement): void {
+  const viewport = currentViewport();
+  const values = new FormData(formElement);
+  const type = stringFormValue(values, 'type').trim();
+  const community = stringFormValue(values, 'community').trim();
+  const minImportanceScore = Number(stringFormValue(values, 'minImportanceScore'));
+
+  state.filters = {
+    type: type || undefined,
+    community: community || undefined,
+    minImportanceScore: Number.isFinite(minImportanceScore) && minImportanceScore > 0 ? minImportanceScore : undefined,
+  };
+  state.message = currentGraphVisibility().active ? 'Graph filters updated. Hidden concepts remain in the working graph.' : 'Full graph view restored.';
+  state.error = undefined;
+  state.agentAnswer = undefined;
+  reconcileSelectionWithVisibility();
+  renderShell();
+  mountGraph(viewport);
+}
+
+function restoreFullGraphView(): void {
+  const viewport = currentViewport();
+  state.filters = {};
+  state.message = 'Full graph view restored.';
+  state.error = undefined;
+  state.agentAnswer = undefined;
+  renderShell();
+  mountGraph(viewport);
+}
+
+function reconcileSelectionWithVisibility(): void {
+  const visibility = currentGraphVisibility();
+  if (!visibility.active || !state.selectedId || !state.selectedKind) return;
+
+  if (state.selectedKind === 'concept') {
+    state.selectedConceptIds = state.selectedConceptIds.filter((id) => visibility.visibleConceptIds.has(id));
+    if (state.selectedConceptIds.length === 0) {
+      clearSelectionState();
+      state.message = 'Graph filters updated. The previous concept selection is hidden by the active filters.';
+      return;
+    }
+    state.selectedId = state.selectedConceptIds[state.selectedConceptIds.length - 1];
+    return;
+  }
+
+  if (!visibility.visibleRelationshipIds.has(state.selectedId)) {
+    clearSelectionState();
+    state.message = 'Graph filters updated. The previous relationship selection is hidden by the active filters.';
   }
 }
 
@@ -657,7 +835,7 @@ function askAgentQuestion(): void {
   state.agentQuestion = question;
 
   try {
-    state.agentAnswer = answerGraphQuestion(state.graph, question);
+    state.agentAnswer = answerGraphQuestion(visibleGraphForFilters(), question);
     state.message = state.agentAnswer.answered ? 'Answered from the current graph.' : undefined;
     state.error = undefined;
   } catch (error) {
@@ -724,6 +902,7 @@ function applyAgentProposal(): void {
     state.selectedKind = result.changedKind;
     state.selectedId = result.changedKind ? result.changedId : undefined;
     state.selectedConceptIds = result.changedKind === 'concept' && result.changedId ? [result.changedId] : [];
+    reconcileSelectionWithVisibility();
   } catch (error) {
     state.message = undefined;
     state.error = error instanceof Error ? `Agent proposed change was rejected: ${error.message}` : 'Agent proposed change was rejected.';
@@ -778,6 +957,7 @@ function applyMutation(message: string, mutation: () => GraphMutationResult, sel
     state.selectedKind = selectKind;
     state.selectedId = selectKind ? result.changedId : undefined;
     state.selectedConceptIds = selectKind === 'concept' ? [result.changedId] : [];
+    reconcileSelectionWithVisibility();
     renderShell();
     mountGraph();
   } catch (error) {
@@ -1025,6 +1205,7 @@ function restoreHistoryStep(step: GraphHistoryStep, message: string): void {
     state.agentProposal = undefined;
     state.agentAppliedSummary = undefined;
     reconcileSelection();
+    reconcileSelectionWithVisibility();
   } catch (error) {
     state.message = undefined;
     state.error = error instanceof Error ? error.message : 'Undo or redo was rejected.';

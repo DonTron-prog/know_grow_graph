@@ -42,11 +42,32 @@ describe('toCytoscapeElements', () => {
     expect(edge?.classes).toContain('relationship');
   });
 
-  it('adds direct relationship counts for visual prominence', () => {
+  it('adds graph-derived insight data for visual prominence', () => {
     const agentLoop = elements.find((element) => element.data.id === 'agent-loop');
 
     expect(agentLoop?.data.relationshipCount).toBe(4);
+    expect(agentLoop?.data.importanceScore).toBe(1);
+    expect(agentLoop?.data.importanceLevel).toBe('high');
     expect(agentLoop?.classes).toContain('degree-4');
+    expect(agentLoop?.classes).toContain('importance-high');
+  });
+
+  it('adds community data and classes for community visual distinction', () => {
+    const graphWithCommunity = requireValidGraph({
+      ...fixtureGraph,
+      nodes: fixtureGraph.nodes.map((node) => ({
+        ...node,
+        properties: { community: node.id === 'guardrails' ? 'Safety' : 'Prompting' },
+      })),
+    });
+
+    const communityElements = toCytoscapeElements(graphWithCommunity);
+    const guardrails = communityElements.find((element) => element.data.id === 'guardrails');
+
+    expect(guardrails?.data.community).toBe('Safety');
+    expect(guardrails?.data.communityColor).toEqual(expect.stringMatching(/^#/));
+    expect(guardrails?.classes).toContain('has-community');
+    expect(guardrails?.classes).toContain('community-safety');
   });
 
   it('uses coherent fallback positions for concepts without saved layout entries', () => {

@@ -8,12 +8,13 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, saved positions, first-class `sourceRefs` examples on concepts/relationships, and an unavailable source-origin example.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
 - No `src/lib` directory exists. Current app/UI code is in `src/app.ts`, renderer-neutral graph logic is in `src/graph/*`, styles are in `src/styles/app.css`, and app integration coverage is in `src/__tests__/app.integration.test.ts`.
-- Present: validation commands are known passing for the current source-grounding increment: focused `pnpm test src/graph/__tests__/validation.test.ts src/graph/__tests__/mutations.test.ts src/graph/__tests__/agentChanges.test.ts src/__tests__/app.integration.test.ts` passed (4 files, 22 tests), full `pnpm test` passed (8 files, 39 tests), and `pnpm build` passed.
+- Present: validation commands are known passing for the current graph insights/filtering increment: focused `pnpm test src/graph/__tests__/metrics.test.ts src/graph/__tests__/cytoscapeAdapter.test.ts src/__tests__/app.integration.test.ts` passed (3 files, 12 tests), full `pnpm test` passed (9 files, 45 tests), and `pnpm build` passed.
 - Present: non-blocking recoverable graph warnings for layout/origin/source-reference issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
 - Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector with source context/unavailable-state rendering, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent panel.
 - Present in Phase 2 UI: single concept/relationship creation dialogs, concept type datalist choose-or-new entry, ordered shift-click concept multi-selection with count/visual distinction and relationship endpoint defaults, optional selected-concept auto-connect as one atomic validated persisted undoable mutation, relationship direction/reverse controls, edit-mode details-panel forms for concept label/type/notes and relationship label/notes with source/target read-only, and guarded Delete/Backspace deletion outside editable controls.
 - Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, Reload graph UI localStorage round trip after deletion, and basic agent question/proposal flows.
-- Still missing: graph insights/filtering controls, richer visual state distinctions, observable saving feedback, and manual browser smoke evidence for the Phase 2/Phase 3 UI flows.
+- Present: P0 graph insights/filtering controls with graph-derived importance scores/levels, type/importance/community filters, visible-vs-total counts, full-graph restore, hidden-without-deletion behavior, coherent recomputation after accepted manual or agent graph changes, and community visual distinction via community data/classes/color.
+- Still missing: richer visual state distinctions beyond the current community/type/importance treatments, observable saving feedback, and manual browser smoke evidence for the Phase 2/Phase 3 UI flows, including browser smoke for filters.
 - Present: `specs/10-manual-editing.md` requires current-session undo/redo for recent accepted manual edits without historical replay, branching, reload persistence, or audit-grade provenance.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
@@ -41,7 +42,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Converts canonical graph data to Cytoscape elements with stable ids, labels, source/target edge data, saved positions, origin/state classes, and direct relationship counts.
   - Keeps Cytoscape JSON as adapter output, not the canonical storage contract.
   - Adapter tests cover fixture output expectations for concepts, relationships, positions, labels, and relationship-count metadata.
-  - Remaining insight/filtering gaps are tracked as P0/P1 items below.
+  - Graph insights now add graph-derived importance scores/levels and community metadata used by filtering and visual classes.
 
 - [x] Implement Phase 1 graph loading and recovery.
   - Loads a saved working graph from browser localStorage when available; otherwise loads `fixtures/source_graph.example.json`.
@@ -62,19 +63,20 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Completed: simple manual edits and accepted agent changes preserve source refs when the source relationship remains clear.
   - Evidence: focused `pnpm test src/graph/__tests__/validation.test.ts src/graph/__tests__/mutations.test.ts src/graph/__tests__/agentChanges.test.ts src/__tests__/app.integration.test.ts` passed (4 files, 22 tests); full `pnpm test` passed (8 files, 39 tests); `pnpm build` passed.
 
-- [ ] P0: Implement graph insights and filtering controls.
-  - Add graph-derived importance/centrality state beyond direct degree classes where useful, with visual emphasis for structurally important concepts.
-  - Add filter UI/state for concept type, importance/degree threshold, and community/cluster when available.
-  - Show visible-vs-total concept/relationship counts while filtered.
-  - Hide filtered elements without deleting graph content, and provide a clear return-to-full-graph action.
-  - Keep insight state and active filters coherent after accepted manual or agent graph changes.
-  - Add focused tests for filtering, full restore, mutation-after-filter behavior, and graph-content preservation.
-  - Evidence: `specs/19-graph-insights-and-filtering.md`; current `src/graph/metrics.ts` only computes direct relationship counts and the toolbar has no filter controls.
+- [x] P0: Implement graph insights and filtering controls.
+  - Completed: graph-derived importance scores and levels are computed from degree normalized to the graph's maximum degree, with visual emphasis for structurally important concepts.
+  - Completed: filter UI/state supports concept type, importance level, and community/cluster controls.
+  - Completed: visible-vs-total concept/relationship counts are shown while filtered.
+  - Completed: filtered elements are hidden without deleting graph content, with a clear full-graph restore action.
+  - Completed: insight state and active filters stay coherent after accepted manual or agent graph changes through recomputation/application on graph updates.
+  - Completed: community metadata is used when explicitly present; otherwise connected components are used only when useful as the fallback community grouping.
+  - Completed: community identity is exposed to Cytoscape through element data/classes and community color for visual distinction, with community filter coverage in graph/app tests.
+  - Evidence: focused `pnpm test src/graph/__tests__/metrics.test.ts src/graph/__tests__/cytoscapeAdapter.test.ts src/__tests__/app.integration.test.ts` passed (3 files, 12 tests); full `pnpm test` passed (9 files, 45 tests); `pnpm build` passed.
 
 - [ ] P1: Expand graph visual distinction states.
   - Add visible treatment for source/user/imported/agent origins for nodes and, if useful, edges; currently only source-origin node styling is explicit.
   - Add treatment for ordinary, hovered, selected, multi-selected, newly/last-changed, and warning-related elements.
-  - Add community/type/importance classes or styling once insight/filter state exists.
+  - Community/type/importance classes and community color styling now exist; remaining visual distinction work should focus on origin, hover, selected, newly/last-changed, and warning-related states.
   - Verify the visual language helps comprehension without turning the app into a general dashboard.
 
 - [ ] P1: Reduce agent panel prominence until agent work is active.
@@ -147,16 +149,16 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: focused `pnpm test src/graph/__tests__/validation.test.ts src/graph/__tests__/mutations.test.ts src/graph/__tests__/agentChanges.test.ts src/__tests__/app.integration.test.ts` passed with 4 files / 22 tests; full `pnpm test` passed with 8 files / 39 tests; `pnpm build` passed.
+  - Current handoff validation: focused `pnpm test src/graph/__tests__/metrics.test.ts src/graph/__tests__/cytoscapeAdapter.test.ts src/__tests__/app.integration.test.ts` passed with 3 files / 12 tests; full `pnpm test` passed with 9 files / 45 tests; `pnpm build` passed.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin classes, type classes, degree classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
 - [x] Source-grounding tests: `sourceRefs` validation/preservation, inspector rendering for available context, unavailable-context messaging for source-origin elements, and preservation through simple manual/agent edits.
-- [ ] Graph insights/filtering tests: importance/degree emphasis, type/community/importance filters, visible-vs-total counts, full restore, mutation while filtered, and no graph-content deletion.
+- [x] Graph insights/filtering tests: cover degree-normalized importance scores/levels, type/community/importance filters, community visual data/classes/color, visible-vs-total counts, full restore, mutation while filtered, and no graph-content deletion.
 - [ ] Visual/workbench tests or smoke: origin styling across source/user/imported/agent, selected/multi-selected/hover/newly-changed/warning states, and agent panel secondary/collapsed behavior.
 - [ ] Loading/saving feedback tests: content-save feedback, layout-save feedback, malformed saved-data UI recovery, save-failure UX, and render timing if localStorage persistence remains synchronous.
-- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows and source-context rendering; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, source context, filters, and recoverable-error usability.
+- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows, source-context rendering, and P0 filter behavior; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, source context, filters, and recoverable-error usability.
 - [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, current-session undo/redo history, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
 - [x] Phase 2 app-level/jsdom UI tests: cover edit-mode gating, ordered shift-click multi-selection including visual class behavior, relationship dialog endpoint prefill/reverse direction, concept creation with selected-concept auto-connect, details-panel edits, Delete/Backspace focus guard and deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
 - [ ] Phase 2 manual browser smoke: confirm the same dialog, multi-selection, details-panel, keyboard, undo/redo, deletion, drag/save layout, and localStorage flows in a real browser.
@@ -166,7 +168,6 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 
 ## Open decisions
 
-- Community/cluster data: decide whether to support imported metadata first, derive a simple fallback, or both.
 - Graph insight UX: decide how visibly to expose community names/labels versus using communities mainly for color, layout, and filters.
 - Repositioning mode: decide whether edit-mode dragging is sufficient or whether a distinct layout/reposition mode is needed for safer review-mode behavior.
 - Agent panel prominence: decide on collapsed/default-secondary presentation versus the current always-visible panel.
@@ -183,7 +184,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Phase 2 keyboard scope: current supported shortcuts are Delete/Backspace for guarded deletion plus Ctrl/Cmd undo/redo; no additional creation/edit shortcuts until a future spec explicitly adds them.
 - Phase 2 details-panel edit scope: concept label/type/notes and relationship label/notes are editable now; relationship source/target are read-only after creation.
 - Product framing: current work centers on one working source-derived concept map that users reshape to match their mental model; multiple competing representations remain out of scope.
-- Graph insights: use a hybrid model with local graph-derived centrality/community/importance for current UI behavior while leaving room for imported or AI-generated metadata later.
+- Graph insights: importance is degree normalized to max degree for the current graph; explicit community metadata is used when present, otherwise connected components are used only when useful. Keep room for imported or AI-generated metadata later.
 - Source grounding: use first-class `sourceRefs` on concepts and relationships; preserve refs for simple transformations where practical; missing or malformed refs are non-fatal warnings and should not block useful manual graph reshaping.
 
 ## Non-goals to preserve

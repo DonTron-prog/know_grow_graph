@@ -1,10 +1,12 @@
 import type cytoscape from 'cytoscape';
-import { relationshipCounts } from './metrics';
+import { graphInsights } from './metrics';
 import type { GraphPosition, KnowledgeGraph } from './types';
 
 function className(value: string | undefined): string {
   return (value ?? 'unknown').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
 }
+
+const COMMUNITY_COLORS = ['#dbeafe', '#dcfce7', '#fef3c7', '#fce7f3', '#ede9fe', '#cffafe', '#ffedd5', '#e0e7ff'];
 
 export function fallbackLayoutPositions(graph: KnowledgeGraph, radius = 260): Record<string, GraphPosition> {
   const centerOffset = graph.nodes.length <= 1 ? 0 : Math.PI / Math.max(graph.nodes.length, 1);
@@ -22,10 +24,15 @@ export function graphPositions(graph: KnowledgeGraph): Record<string, GraphPosit
 }
 
 export function toCytoscapeElements(graph: KnowledgeGraph): cytoscape.ElementDefinition[] {
-  const counts = relationshipCounts(graph);
+  const insights = graphInsights(graph);
   const positions = graphPositions(graph);
   const nodeElements: cytoscape.ElementDefinition[] = graph.nodes.map((node) => {
-    const relationshipCount = counts.get(node.id) ?? 0;
+    const insight = insights.concepts.get(node.id);
+    const relationshipCount = insight?.relationshipCount ?? 0;
+    const importanceLevel = insight?.importanceLevel ?? 'isolated';
+    const community = insight?.community;
+    const communityIndex = community ? insights.communities.indexOf(community) : -1;
+    const communityColor = communityIndex >= 0 ? COMMUNITY_COLORS[communityIndex % COMMUNITY_COLORS.length] : '';
     return {
       group: 'nodes',
       data: {
@@ -35,9 +42,22 @@ export function toCytoscapeElements(graph: KnowledgeGraph): cytoscape.ElementDef
         origin: node.origin ?? 'unknown',
         notes: node.notes ?? '',
         relationshipCount,
+        importanceScore: insight?.importanceScore ?? 0,
+        importanceLevel,
+        community: community ?? '',
+        communityIndex,
+        communityColor,
       },
       position: positions[node.id],
-      classes: ['concept', `origin-${className(node.origin)}`, `type-${className(node.type)}`, `degree-${Math.min(relationshipCount, 5)}`].join(' '),
+      classes: [
+        'concept',
+        `origin-${className(node.origin)}`,
+        `type-${className(node.type)}`,
+        `degree-${Math.min(relationshipCount, 5)}`,
+        `importance-${importanceLevel}`,
+        community ? 'has-community' : undefined,
+        community ? `community-${className(community)}` : undefined,
+      ].filter(Boolean).join(' '),
     };
   });
 

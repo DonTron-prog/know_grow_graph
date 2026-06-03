@@ -6,7 +6,7 @@ import type { GraphPosition, KnowledgeGraph } from '../graph/types';
 
 type CytoscapeElementDefinition = {
   group?: 'nodes' | 'edges';
-  data: { id: string; source?: string; target?: string; label?: string };
+  data: { id: string; source?: string; target?: string; label?: string; type?: string; importanceLevel?: string };
   position?: GraphPosition;
 };
 
@@ -208,6 +208,22 @@ describe('app UI integration', () => {
     await import('../app');
 
     expect(document.body.textContent).toContain('Review mode');
+    expect(document.body.textContent).toContain('Full graph visible');
+    expect(core().nodeElements).toHaveLength(10);
+    expect(core().getElementById('agent-loop')?.definition.data.importanceLevel).toBe('high');
+
+    const filterForm = form('data-filter-form');
+    setField(filterForm, 'minImportanceScore', '0.66');
+    filterForm.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    expect(document.body.textContent).toContain('3/10 concepts visible');
+    expect(document.body.textContent).toContain('1/11 relationships visible');
+    expect(core().nodeElements.map((node) => node.id()).sort()).toEqual(['agent-loop', 'guardrails', 'prompting']);
+
+    clickButton('Return to full graph');
+    expect(document.body.textContent).toContain('Full graph visible');
+    expect(core().nodeElements).toHaveLength(10);
+    expect(core().edgeElements).toHaveLength(11);
+
     core().triggerNodeTap('prompting');
     expect(document.body.textContent).toContain('Source context');
     expect(document.body.textContent).toContain('Applied Agentic AI notes');
@@ -334,6 +350,30 @@ describe('app UI integration', () => {
       expect.objectContaining({ id: 'agent-review', label: 'Agent Review', type: 'method', notes: 'Proposed by the agent helper.', origin: 'agent' }),
     ]));
     expect(document.body.textContent).toContain('Applied agent change');
+
+    const typeFilterForm = form('data-filter-form');
+    setField(typeFilterForm, 'type', 'method');
+    typeFilterForm.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    expect(document.body.textContent).toContain('1/11 concepts visible');
+    expect(core().nodeElements.map((node) => node.id())).toEqual(['agent-review']);
+
+    clickButton('Add concept');
+    const filteredConceptForm = form('data-concept-form');
+    setField(filteredConceptForm, 'label', 'Filtered Method');
+    setField(filteredConceptForm, 'type', 'method');
+    setField(filteredConceptForm, 'notes', 'Added while the method type filter is active.');
+    checkedField(filteredConceptForm, 'connectSelected', false);
+    submit(filteredConceptForm);
+    graph = savedGraph();
+    expect(graph.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'filtered-method', label: 'Filtered Method', type: 'method' }),
+    ]));
+    expect(document.body.textContent).toContain('2/12 concepts visible');
+    expect(core().nodeElements.map((node) => node.id()).sort()).toEqual(['agent-review', 'filtered-method']);
+
+    clickButton('Return to full graph');
+    expect(core().nodeElements).toHaveLength(12);
+    expect(core().edgeElements).toHaveLength(graph.edges.length);
 
     const nodeCountAfterAgentApply = graph.nodes.length;
     const unsupportedChangeInput = document.querySelector<HTMLTextAreaElement>('#agent-change-request');
