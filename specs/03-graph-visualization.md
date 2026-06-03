@@ -2,7 +2,7 @@
 
 ## JTBD
 
-As a user, I need concepts and relationships to be legible so I can understand the graph without guessing.
+As a user, I need concepts, relationships, and structural patterns to be legible so I can understand the concept map without guessing.
 
 ## Topic
 
@@ -17,7 +17,9 @@ Phase 1.
 - Loaded concepts are visible or reachable in the graph view.
 - Loaded relationships are visible or inspectable in the graph view.
 - Concept labels are readable at the initial review scale.
-- Concept size or visual prominence reflects the number of direct relationships when doing so improves review.
+- Concept size or visual prominence reflects structural importance when doing so improves review.
+- Highly connected or central concepts are easier to notice than peripheral concepts when the graph structure supports that distinction.
+- Visual grouping or clustering helps users recognize communities of related concepts when that information is available.
 - Relationship meaning can be discovered without losing context.
 - Visual treatment helps users distinguish ordinary, hovered, selected, newly changed, or warning-related elements.
 - Source-derived, user-created, imported, or agent-created content can be visually distinguished when that origin is available.
@@ -27,4 +29,5 @@ Phase 1.
 ## Non-Goals
 
 - Visual beauty is less important than legibility.
-- Advanced analytics are not required for graph visualization.
+- Advanced analytics explanations are not required for graph visualization.
+- Multiple graph representations are not required for graph visualization.

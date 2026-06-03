@@ -21,6 +21,7 @@ Phase 2, extended in Phase 3 for agent-proposed changes.
 - Malformed graph changes are rejected.
 - Blocked changes leave the previous valid graph unchanged.
 - Non-blocking warnings are visible without preventing exploratory work.
+- Missing or incomplete source context does not make an otherwise valid graph change invalid.
 - The displayed graph remains valid after every accepted change.
 - The same validity rules apply to loaded, manual, imported, and saved changes.
 - The same validity rules apply to agent-proposed changes when agent change features are active.
@@ -30,4 +31,5 @@ Phase 2, extended in Phase 3 for agent-proposed changes.
 ## Non-Goals
 
 - Warnings do not need to become audit records.
+- Audit-grade provenance is not required for validity protection.
 - Advanced graph analytics are not required for validity protection.

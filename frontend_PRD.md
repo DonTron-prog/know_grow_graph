@@ -1,10 +1,12 @@
-# Frontend PRD: Incremental Cytoscape.js Knowledge Graph Workbench
+# Frontend PRD: Incremental Cytoscape.js Concept Map Workbench
 
 ## 1. Product Summary
 
-The project is a greenfield knowledge graph workbench, intentionally narrow and incremental.
+The project is a greenfield concept-map workbench, intentionally narrow and incremental.
 
-The immediate goal is to prove that the graph can render well with Cytoscape.js and that the layout/interaction model feels right. The graph data should remain renderer-neutral, with adapters into Cytoscape.js for browser rendering and headless Node.js graph operations. AI functionality, natural-language graph operations, lineage, branching, snapshots, and durable state history are not priorities for the first phase.
+Users come to the workbench to examine source-derived material such as research documents, codebases, and projects. The initial graph is a concept map: a representation of concepts and relationships extracted from the material. The user’s goal is not only to correct extraction mistakes, but to reshape the working graph into a representation that improves understanding and matches their mental model.
+
+The immediate goal is to prove that the graph can render well with Cytoscape.js and that the layout/interaction model feels right for one working concept map. The graph data should remain renderer-neutral, with adapters into Cytoscape.js for browser rendering and headless Node.js graph operations. AI functionality, natural-language graph operations, lineage, branching, snapshots, multiple competing graph representations, and durable state history are not priorities for the first phase.
 
 ## 2. Product Goal
 
@@ -14,7 +16,7 @@ Build in three phases:
 2. **Manual operations**: add, delete, select, drag, and edit graph elements manually.
 3. **Agent integration**: add AI-assisted question answering and natural-language graph manipulation once the manual graph experience is proven.
 
-The first success condition is simple: the graph renders clearly and can be inspected/manipulated at the current concept-graph scale.
+The first success condition is simple: the source-derived concept map renders clearly, surfaces useful structure, and can be inspected/manipulated at the current concept-graph scale.
 
 ## 3. Phase 1: Cytoscape.js Render and Layout
 
@@ -28,7 +30,10 @@ Required capabilities:
 - load a working graph from the backend or a fixture
 - render concept nodes and relationship edges without a page reload
 - show readable concept labels at the initial concept-graph scale
-- size or visually emphasize concept nodes based on their number of direct relationships
+- size or visually emphasize concept nodes based on graph-derived structural importance
+- visually distinguish graph communities or clusters when useful
+- provide first-pass clutter reduction through centrality, community, and concept-type filtering
+- preserve and display source context for source-derived concepts and relationships when available
 - support zoom and pan
 - support concept click selection
 - support concept hover affordances
@@ -42,21 +47,24 @@ Required capabilities:
 
 Visual priorities:
 
+- graph communities or clusters that help reveal structure
+- filtering or hiding low-importance concepts to reduce clutter
+- centrality-aware visual emphasis for important concepts
 - legible labels
 - stable layout
 - clear selection state
 - clear hover state
-- relationship-count-aware node sizing that improves comprehension without overwhelming labels
 - simple edge styling
 - no polished design system required
 
 ## 4. Phase 2: Manual Graph Operations
 
-After Cytoscape.js render/layout is validated, add manual operations incrementally.
+After Cytoscape.js render/layout is validated, add manual operations incrementally. Manual editing should feel like a hybrid workbench: common changes should be canvas-first and fast, while richer details remain available through structured dialogs and the details panel. The purpose is to let users shape the concept map around their understanding, not only to correct errors.
 
 Required operations:
 
 - add concept node through a single creation dialog
+- allow user-created concepts and relationships without source context
 - add relationship edge through a single creation dialog
 - shift-click two concepts to open relationship creation with those concepts prefilled
 - choose relationship direction in the relationship creation dialog
@@ -78,7 +86,7 @@ Nice-to-have operations after basics work:
 - additional layout presets
 - layout polish controls
 
-For this phase, state can remain simple. Do not build lineage, branching, deterministic replay, or audit history.
+For this phase, state can remain simple. Do not build lineage, branching, deterministic replay, or audit history. Preserve source context for simple edits when the source relationship remains clear, but do not block useful graph reshaping when complete provenance cannot be preserved.
 
 ## 5. Phase 3: Agent and Natural Language Operations
 
@@ -89,7 +97,10 @@ Target capabilities:
 - ask questions over the graph data
 - ask the agent to propose graph edits
 - apply validated agent edits to the graph
-- use natural language to add, delete, connect, merge, or reorganize graph elements
+- use natural language to add, delete, connect, merge, split, or reorganize graph elements
+- recommend missing concepts and relationships
+- recommend concept type/category changes
+- preserve source context for simple transformations when practical
 - run graph validation, traversal, and mutation helpers in Node.js without requiring a browser DOM
 - show a plain-language summary of what the agent changed
 
@@ -151,6 +162,10 @@ Keep the stored/working graph model independent from the rendered DOM. Cytoscape
 
 The project should still own the canonical graph schema. Cytoscape.js element JSON is an adapter format, not the only storage contract, unless that decision is made explicitly later.
 
+Use a hybrid insight model. The current workbench should derive importance, centrality, communities, and filter state from the current working graph where practical. The graph model may also preserve imported or generated insight metadata for future explanation and agent workflows, but stored metadata should not be required for the current UI to provide useful emphasis or filtering.
+
+Use lightweight source grounding. Source-derived concepts and relationships may carry source names, locations, excerpts, or similar references. User-created or heavily transformed graph elements may have no source context. Missing provenance should not make graph content invalid.
+
 Phase 1 backend needs only:
 
 - health endpoint
@@ -184,10 +199,12 @@ Phase 1 succeeds when:
 
 1. Cytoscape.js renders the graph reliably.
 2. The graph layout is legible and stable enough to evaluate.
-3. Concept size or prominence reflects relationship count clearly enough to identify highly connected notes.
-4. Zoom, pan, hover, and selection work.
-5. Labels are readable at the target graph scale.
-6. The implementation is simple enough to iterate on manual operations next.
+3. Concept prominence makes structurally important concepts easier to notice.
+4. Communities, centrality, and concept types can support first-pass clutter reduction.
+5. Available source context can be inspected for source-derived graph elements.
+6. Zoom, pan, hover, and selection work.
+7. Labels are readable at the target graph scale.
+8. The implementation is simple enough to iterate on manual operations next.
 
 Phase 2 succeeds when manual add/delete/edit/reposition operations, selected-element details editing, relationship creation from shift-selection, and undo/redo keyboard operations work.
 

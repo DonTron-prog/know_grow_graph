@@ -2,7 +2,7 @@
 
 ## JTBD
 
-As a user, I need to add knowledge to the graph myself so I can expand it during review.
+As a user, I need to add knowledge to the graph myself so I can shape the concept map around my understanding.
 
 ## Topic
 
@@ -19,6 +19,7 @@ Phase 2.
 - The concept type field lets users choose from existing type values or enter a new value.
 - When one or more concepts are selected, creating a concept can connect the new concept to every selected concept using relationship details confirmed in the same dialog.
 - A created concept appears in the graph promptly.
+- A user-created concept can exist without source context.
 - A created concept can be selected after creation.
 - A created concept can be inspected after creation.
 - Users can create a relationship between existing concepts when manual editing is active.
@@ -26,6 +27,7 @@ Phase 2.
 - Starting relationship creation from a two-concept shift-selection opens the relationship dialog with those concepts prefilled.
 - The relationship dialog lets users choose or reverse direction before saving.
 - A created relationship appears in the graph promptly.
+- A user-created relationship can exist without source context.
 - A created relationship can be inspected after creation when relationship inspection is supported.
 - Invalid creations are rejected without damaging the graph.
 - Creating a concept plus automatic relationships succeeds or fails as one accepted change.

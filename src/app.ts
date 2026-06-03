@@ -13,7 +13,7 @@ import type { AgentGraphChangeProposal } from './graph/agentChanges';
 import type { GraphQuestionAnswer } from './graph/agentQuestions';
 import type { GraphHistory, GraphHistoryStep } from './graph/history';
 import type { GraphMutationResult } from './graph/mutations';
-import type { GraphPosition, KnowledgeGraph } from './graph/types';
+import type { GraphOrigin, GraphPosition, KnowledgeGraph, SourceReference } from './graph/types';
 
 interface AppState {
   graph: KnowledgeGraph;
@@ -214,6 +214,7 @@ function renderInspector(): string {
     return `
       <h2>${escapeHtml(concept.label)}</h2>
       ${editDetails}
+      ${renderSourceContext(concept.origin, concept.sourceRefs)}
       <h3>Connected relationships</h3>
       <ul>${relationships.map((edge) => `<li>${escapeHtml(edge.source)} — ${escapeHtml(edge.label)} → ${escapeHtml(edge.target)}</li>`).join('')}</ul>
       <button type="button" data-action="clear-selection">Clear selection</button>`;
@@ -247,6 +248,7 @@ function renderInspector(): string {
     return `
       <h2>${escapeHtml(relationship.label)}</h2>
       ${editDetails}
+      ${renderSourceContext(relationship.origin, relationship.sourceRefs)}
       <button type="button" data-action="clear-selection">Clear selection</button>`;
   }
 
@@ -260,6 +262,36 @@ function renderInspector(): string {
       <dt>Layout</dt><dd>${state.layoutStatus}</dd>
     </dl>
     <p>Select a concept or relationship to inspect details.</p>`;
+}
+
+function renderSourceContext(origin: GraphOrigin | undefined, sourceRefs: SourceReference[] | undefined): string {
+  if (sourceRefs && sourceRefs.length > 0) {
+    return `
+      <section class="source-context" aria-label="Source context">
+        <h3>Source context</h3>
+        <ul>${sourceRefs.map(renderSourceReference).join('')}</ul>
+      </section>`;
+  }
+
+  if (origin === 'source') {
+    return `
+      <section class="source-context unavailable" aria-label="Source context">
+        <h3>Source context</h3>
+        <p>Source context unavailable.</p>
+      </section>`;
+  }
+
+  return '';
+}
+
+function renderSourceReference(ref: SourceReference): string {
+  const parts = [
+    ref.sourceName ? `<strong>${escapeHtml(ref.sourceName)}</strong>` : '',
+    ref.location ? `<span>Location: ${escapeHtml(ref.location)}</span>` : '',
+    ref.reference ? `<span>Reference: ${escapeHtml(ref.reference)}</span>` : '',
+    ref.excerpt ? `<blockquote>${escapeHtml(ref.excerpt)}</blockquote>` : '',
+  ].filter(Boolean);
+  return `<li>${parts.join('')}</li>`;
 }
 
 function unavailableSelection(): string {

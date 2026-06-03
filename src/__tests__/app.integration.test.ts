@@ -208,6 +208,17 @@ describe('app UI integration', () => {
     await import('../app');
 
     expect(document.body.textContent).toContain('Review mode');
+    core().triggerNodeTap('prompting');
+    expect(document.body.textContent).toContain('Source context');
+    expect(document.body.textContent).toContain('Applied Agentic AI notes');
+    expect(document.body.textContent).toContain('Prompting section');
+    expect(document.body.textContent).toContain('Prompting defines the task');
+    core().triggerEdgeTap('edge-prompting-persona');
+    expect(document.body.textContent).toContain('Persona prompting section');
+    expect(document.body.textContent).toContain('Persona framing is one prompting technique');
+    core().triggerNodeTap('persona');
+    expect(document.body.textContent).toContain('Source context unavailable.');
+
     clickButton('Add concept');
     expect(document.body.textContent).toContain('Enable content editing before changing the graph.');
     expect(document.querySelector('[data-concept-form]')).toBeNull();
@@ -262,6 +273,8 @@ describe('app UI integration', () => {
     expect(graph.nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'review-lens', label: 'Review Lens', type: 'review-method', notes: 'Added through the app-level creation dialog.' }),
     ]));
+    expect(graph.nodes.find((node) => node.id === 'review-lens')?.sourceRefs).toBeUndefined();
+    expect(document.body.textContent).not.toContain('Source context unavailable.');
     expect(graph.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'prompting', target: 'review-lens', label: 'contextualizes' }),
       expect.objectContaining({ source: 'evaluation', target: 'review-lens', label: 'contextualizes' }),

@@ -7,12 +7,20 @@ export interface GraphPosition {
   y: number;
 }
 
+export interface SourceReference {
+  sourceName?: string;
+  location?: string;
+  excerpt?: string;
+  reference?: string;
+}
+
 export interface ConceptNode {
   id: string;
   label: string;
   type: string;
   origin?: GraphOrigin;
   notes?: string;
+  sourceRefs?: SourceReference[];
   properties?: Record<string, unknown>;
 }
 
@@ -23,6 +31,7 @@ export interface RelationshipEdge {
   label: string;
   origin?: GraphOrigin;
   notes?: string;
+  sourceRefs?: SourceReference[];
   properties?: Record<string, unknown>;
 }
 

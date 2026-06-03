@@ -24,7 +24,27 @@ describe('validateGraph', () => {
     expect(result.graph?.nodes).toHaveLength(10);
     expect(result.graph?.edges).toHaveLength(11);
     expect(result.graph?.name).toContain('Agentic AI');
+    expect(result.graph?.nodes.find((node) => node.id === 'prompting')?.sourceRefs?.[0]).toMatchObject({
+      sourceName: 'Applied Agentic AI notes',
+      location: 'Prompting section',
+      reference: 'applied_agentic_ai_vault/prompting.md#prompting',
+    });
+    expect(result.graph?.edges.find((edge) => edge.id === 'edge-prompting-persona')?.sourceRefs?.[0]?.excerpt).toContain('Persona framing');
+    expect(result.graph?.nodes.find((node) => node.id === 'persona')?.sourceRefs).toBeUndefined();
     expect(result.errors).toHaveLength(0);
+  });
+
+  it('keeps missing or malformed source context non-fatal', () => {
+    const graph = cloneFixture();
+    graph.nodes[1] = { ...graph.nodes[1], sourceRefs: [{ sourceName: '   ' }, { sourceName: 42 }, 'not an object'] };
+    graph.edges[1] = { ...graph.edges[1], sourceRefs: 'not an array' };
+
+    const result = validateGraph(graph);
+
+    expect(result.ok).toBe(true);
+    expect(result.graph?.nodes.find((node) => node.id === 'persona')?.sourceRefs).toBeUndefined();
+    expect(result.graph?.edges.find((edge) => edge.id === 'edge-prompting-few-shot')?.sourceRefs).toBeUndefined();
+    expect(result.warnings.map((warning) => warning.code)).toEqual(expect.arrayContaining(['source_ref_unreadable', 'source_ref_invalid', 'source_refs_invalid']));
   });
 
   it('rejects duplicate concept ids without replacing valid graph content', () => {

@@ -9,6 +9,14 @@
       "type": "concept",
       "origin": "source",
       "notes": "How instructions shape model behavior.",
+      "sourceRefs": [
+        {
+          "sourceName": "Applied Agentic AI notes",
+          "location": "Prompting section",
+          "excerpt": "Prompting defines the task, constraints, examples, and role framing that shape model behavior.",
+          "reference": "applied_agentic_ai_vault/prompting.md#prompting"
+        }
+      ],
       "properties": {}
     },
     {
@@ -91,6 +99,14 @@
       "target": "persona",
       "label": "uses",
       "origin": "source",
+      "sourceRefs": [
+        {
+          "sourceName": "Applied Agentic AI notes",
+          "location": "Persona prompting section",
+          "excerpt": "Persona framing is one prompting technique for setting expectations about the model's role and response style.",
+          "reference": "applied_agentic_ai_vault/prompting.md#persona"
+        }
+      ],
       "properties": {}
     },
     {

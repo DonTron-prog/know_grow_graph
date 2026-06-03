@@ -2,7 +2,7 @@
 
 ## JTBD
 
-As a user, I need to correct existing graph knowledge so the workbench reflects my understanding.
+As a user, I need to reshape existing graph knowledge so the workbench reflects my understanding and mental model.
 
 ## Topic
 
@@ -26,6 +26,8 @@ Phase 2.
 - Undo and redo update the graph, inspector, and counts promptly without leaving invalid graph content visible.
 - Invalid edits are rejected without replacing valid graph content.
 - Editing a source-derived item changes only the working graph.
+- Simple edits preserve available source context when the source relationship remains clear.
+- Edits are allowed even when preserving complete source context is not practical.
 - Editing does not require historical replay.
 - Editing does not require branching.
 
@@ -34,3 +36,4 @@ Phase 2.
 - Rich text authoring is not required for the current release.
 - Undo and redo do not need to preserve history across reloads.
 - Audit-grade provenance is not required for manual editing.
+- Complete source lineage for every edit is not required for manual editing.

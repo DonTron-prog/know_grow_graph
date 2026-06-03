@@ -265,6 +265,45 @@ button.active {
   overflow-wrap: anywhere;
 }
 
+.source-context {
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  border-radius: 10px;
+  color: #164e63;
+  margin: 1rem 0;
+  padding: 0.75rem;
+}
+
+.source-context.unavailable {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #64748b;
+}
+
+.source-context h3 {
+  margin-bottom: 0.5rem;
+}
+
+.source-context ul {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.source-context li {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.source-context blockquote {
+  border-left: 3px solid #06b6d4;
+  font-style: italic;
+  margin: 0.25rem 0 0;
+  padding-left: 0.75rem;
+}
+
 .graph-panel {
   background: #ffffff;
   min-height: 0;

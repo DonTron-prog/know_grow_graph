@@ -29,6 +29,7 @@ describe('graph mutations', () => {
     expect(result.changedId).toBe('prompting-2');
     expect(result.graph.nodes).toHaveLength(graph.nodes.length + 1);
     expect(result.graph.nodes.find((node) => node.id === result.changedId)).toMatchObject({ label: 'Prompting', type: 'practice', origin: 'user' });
+    expect(result.graph.nodes.find((node) => node.id === result.changedId)?.sourceRefs).toBeUndefined();
     expect(result.graph.layout?.[result.changedId]).toEqual({ x: 10, y: 20 });
     expect(result.graph.stateType).toBe('working');
     expect(graph.nodes).toHaveLength(10);
@@ -41,6 +42,7 @@ describe('graph mutations', () => {
 
     expect(result.graph.edges).toHaveLength(graph.edges.length + 1);
     expect(result.graph.edges.find((edge) => edge.id === result.changedId)).toMatchObject({ source: 'prompting', target: 'evaluation', label: 'supports', origin: 'user' });
+    expect(result.graph.edges.find((edge) => edge.id === result.changedId)?.sourceRefs).toBeUndefined();
     expect(() => createRelationship(graph, { source: 'prompting', target: 'missing', label: 'breaks' })).toThrow(/not available/);
     expect(graph.edges).toHaveLength(11);
   });
@@ -76,7 +78,9 @@ describe('graph mutations', () => {
     const updatedRelationship = updateRelationship(updatedConcept, 'edge-prompting-persona', { label: 'frames', notes: 'Manual relationship note.' }).graph;
 
     expect(updatedRelationship.nodes.find((node) => node.id === 'prompting')).toMatchObject({ label: 'Prompt design', type: 'skill', notes: 'Refined by the user.' });
+    expect(updatedRelationship.nodes.find((node) => node.id === 'prompting')?.sourceRefs?.[0]?.reference).toBe('applied_agentic_ai_vault/prompting.md#prompting');
     expect(updatedRelationship.edges.find((edge) => edge.id === 'edge-prompting-persona')).toMatchObject({ label: 'frames', notes: 'Manual relationship note.' });
+    expect(updatedRelationship.edges.find((edge) => edge.id === 'edge-prompting-persona')?.sourceRefs?.[0]?.reference).toBe('applied_agentic_ai_vault/prompting.md#persona');
     expect(graph.nodes.find((node) => node.id === 'prompting')?.label).toBe('Prompting');
     expect(() => updateConcept(graph, 'prompting', { label: '   ' })).toThrow(/Concept label is required/);
   });

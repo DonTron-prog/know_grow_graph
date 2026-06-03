@@ -36,6 +36,7 @@ describe('agent graph changes', () => {
 
     expect(sourceGraph.nodes.find((node) => node.id === 'prompting')?.label).toBe('Prompting');
     expect(result.graph.nodes.find((node) => node.id === 'prompting')?.label).toBe('Prompt Design');
+    expect(result.graph.nodes.find((node) => node.id === 'prompting')?.sourceRefs?.[0]?.reference).toBe('applied_agentic_ai_vault/prompting.md#prompting');
   });
 
   it('rejects invalid proposals safely before replacing the previous valid graph', () => {

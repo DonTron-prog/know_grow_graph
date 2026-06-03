@@ -6,6 +6,7 @@ import type {
   GraphValidationResult,
   KnowledgeGraph,
   RelationshipEdge,
+  SourceReference,
   ValidationIssue,
 } from './types';
 
@@ -37,6 +38,37 @@ function optionalNotes(value: unknown): string | undefined {
 
 function optionalProperties(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
+}
+
+function optionalSourceRefs(value: unknown, path: string, warnings: ValidationIssue[]): SourceReference[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    warnings.push(issue('warning', 'source_refs_invalid', `Source references at ${path} are malformed and will be ignored.`, path));
+    return undefined;
+  }
+
+  const refs = value.flatMap((item, index): SourceReference[] => {
+    const itemPath = `${path}[${index}]`;
+    if (!isRecord(item)) {
+      warnings.push(issue('warning', 'source_ref_invalid', `Source reference at ${itemPath} is malformed and will be ignored.`, itemPath));
+      return [];
+    }
+
+    const ref: SourceReference = {};
+    if (isNonEmptyString(item.sourceName)) ref.sourceName = item.sourceName.trim();
+    if (isNonEmptyString(item.location)) ref.location = item.location.trim();
+    if (isNonEmptyString(item.excerpt)) ref.excerpt = item.excerpt.trim();
+    if (isNonEmptyString(item.reference)) ref.reference = item.reference.trim();
+
+    if (!ref.sourceName && !ref.location && !ref.excerpt && !ref.reference) {
+      warnings.push(issue('warning', 'source_ref_unreadable', `Source reference at ${itemPath} has no readable context and will be ignored.`, itemPath));
+      return [];
+    }
+
+    return [ref];
+  });
+
+  return refs.length > 0 ? refs : undefined;
 }
 
 function validateNodes(value: unknown, errors: ValidationIssue[], warnings: ValidationIssue[]): ConceptNode[] {
@@ -75,6 +107,7 @@ function validateNodes(value: unknown, errors: ValidationIssue[], warnings: Vali
       type,
       origin: optionalOrigin(node.origin, `${path}.origin`, warnings),
       notes: optionalNotes(node.notes),
+      sourceRefs: optionalSourceRefs(node.sourceRefs, `${path}.sourceRefs`, warnings),
       properties: optionalProperties(node.properties),
     }];
   });
@@ -119,6 +152,7 @@ function validateEdges(value: unknown, errors: ValidationIssue[], warnings: Vali
       label,
       origin: optionalOrigin(edge.origin, `${path}.origin`, warnings),
       notes: optionalNotes(edge.notes),
+      sourceRefs: optionalSourceRefs(edge.sourceRefs, `${path}.sourceRefs`, warnings),
       properties: optionalProperties(edge.properties),
     }];
   });

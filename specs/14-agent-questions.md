@@ -2,7 +2,7 @@
 
 ## JTBD
 
-As a user, I need help understanding graph knowledge so I can ask questions after the graph experience works.
+As a user, I need help understanding the concept map and its source-derived knowledge after the graph experience works.
 
 ## Topic
 
@@ -17,6 +17,7 @@ Phase 3.
 - Agent question features stay secondary until graph review is dependable.
 - Users can ask questions about the current graph when agent features are active.
 - Answers are grounded in currently available graph content.
+- Answers use available source context when it helps explain source-derived concepts or relationships.
 - Answers are understandable without reading raw tool output.
 - Question answering does not mutate graph content.
 - The workbench communicates when the agent cannot answer from the graph.
