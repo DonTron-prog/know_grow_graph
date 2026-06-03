@@ -14,14 +14,28 @@ import type { GraphQuestionAnswer } from './graph/agentQuestions';
 import type { GraphHistory, GraphHistoryStep } from './graph/history';
 import type { GraphMutationResult } from './graph/mutations';
 import type { GraphFilters } from './graph/metrics';
-import type { GraphOrigin, GraphPosition, KnowledgeGraph, SourceReference } from './graph/types';
+import type { GraphOrigin, GraphPosition, GraphValidationResult, KnowledgeGraph, SourceReference } from './graph/types';
+
+type ElementKind = 'concept' | 'relationship';
+
+interface ElementReference {
+  id: string;
+  kind: ElementKind;
+}
+
+interface WarningElementIds {
+  concepts: string[];
+  relationships: string[];
+}
 
 interface AppState {
   graph: KnowledgeGraph;
   source: 'working' | 'fixture';
   selectedId?: string;
-  selectedKind?: 'concept' | 'relationship';
+  selectedKind?: ElementKind;
   selectedConceptIds: string[];
+  lastChanged?: ElementReference;
+  warningElementIds: WarningElementIds;
   filters: GraphFilters;
   activeDialog?: 'concept' | 'relationship';
   layoutStatus: 'saved' | 'unsaved';
@@ -62,8 +76,9 @@ let state: AppState = {
   saving: false,
   editMode: false,
   selectedConceptIds: [],
+  warningElementIds: warningElementIdsFromValidation(initialLoad.validation, initialLoad.graph),
   filters: {},
-  warnings: validationWarnings(initialLoad.validation),
+  warnings: validationWarningMessages(initialLoad.validation),
   history: emptyGraphHistory(),
   agentQuestion: '',
   agentChangeRequest: '',
@@ -86,9 +101,11 @@ function loadIntoState(): void {
       saving: false,
       editMode: state.editMode,
       selectedConceptIds: [],
+      lastChanged: undefined,
+      warningElementIds: recoveredFromInvalidSavedGraph ? emptyWarningElementIds() : warningElementIdsFromValidation(result.validation, result.graph),
       filters: state.filters,
       activeDialog: undefined,
-      warnings: recoveredFromInvalidSavedGraph ? [] : validationWarnings(result.validation),
+      warnings: recoveredFromInvalidSavedGraph ? [] : validationWarningMessages(result.validation),
       history: emptyGraphHistory(),
       agentQuestion: state.agentQuestion,
       agentAnswer: undefined,
@@ -145,6 +162,7 @@ function renderShell(): void {
       <section class="workspace">
         <aside class="inspector" aria-label="Graph inspector">${renderInspector()}</aside>
         <div class="graph-panel">
+          ${renderGraphVisualLegend()}
           <div id="cy" aria-label="Concept graph"></div>
         </div>
         <aside class="agent-panel" aria-label="Agent graph question panel">${renderAgentPanel()}</aside>
@@ -182,6 +200,18 @@ function renderShell(): void {
     event.preventDefault();
     updateRelationshipFromDetails(event.currentTarget as HTMLFormElement);
   });
+}
+
+function renderGraphVisualLegend(): string {
+  return `
+    <aside class="graph-legend" aria-label="Graph visual state legend">
+      <span><i class="legend-swatch origin-source"></i>Source</span>
+      <span><i class="legend-swatch origin-user"></i>User</span>
+      <span><i class="legend-swatch origin-agent"></i>Agent</span>
+      <span><i class="legend-swatch origin-imported"></i>Imported</span>
+      <span><i class="legend-swatch last-changed"></i>Last changed</span>
+      <span><i class="legend-swatch warning-related"></i>Warning</span>
+    </aside>`;
 }
 
 function renderInsightControls(visibility = currentGraphVisibility()): string {
@@ -583,10 +613,13 @@ function mountGraph(viewport?: GraphViewport): void {
         { selector: 'node.origin-user', style: { 'background-color': '#f0fdf4', 'border-color': '#15803d' } },
         { selector: 'node.origin-agent', style: { 'background-color': '#fef3c7', 'border-color': '#b45309' } },
         { selector: 'node.origin-imported', style: { 'background-color': '#ede9fe', 'border-color': '#7c3aed' } },
+        { selector: 'node.origin-unknown', style: { 'background-color': '#f8fafc', 'border-color': '#64748b', 'border-style': 'dashed' } },
         { selector: 'node.has-community', style: { 'background-color': 'data(communityColor)' } },
         { selector: 'node.importance-high', style: { 'border-width': '5px', 'font-weight': 700 } },
         { selector: 'node.importance-medium', style: { 'border-width': '3px' } },
         { selector: 'node.importance-isolated', style: { opacity: 0.72, 'border-style': 'dashed' } },
+        { selector: 'node.warning-related', style: { 'border-color': '#dc2626', 'border-width': '6px', 'border-style': 'dotted', 'overlay-color': '#f87171', 'overlay-opacity': 0.12, 'overlay-padding': '8px' } },
+        { selector: 'node.last-changed', style: { 'border-color': '#0f766e', 'border-width': '6px', 'border-style': 'double', 'overlay-color': '#14b8a6', 'overlay-opacity': 0.16, 'overlay-padding': '10px' } },
         { selector: 'node:selected', style: { 'background-color': '#fde68a', 'border-color': '#92400e', 'border-width': '4px' } },
         { selector: 'node.multi-selected', style: { 'background-color': '#bbf7d0', 'border-color': '#15803d', 'border-width': '5px' } },
         { selector: 'node.hovered', style: { 'border-width': '5px', 'border-color': '#2563eb' } },
@@ -606,6 +639,13 @@ function mountGraph(viewport?: GraphViewport): void {
             'text-background-padding': '3px',
           },
         },
+        { selector: 'edge.origin-source', style: { 'line-color': '#0369a1', 'target-arrow-color': '#0369a1' } },
+        { selector: 'edge.origin-user', style: { 'line-color': '#15803d', 'target-arrow-color': '#15803d' } },
+        { selector: 'edge.origin-agent', style: { 'line-color': '#b45309', 'target-arrow-color': '#b45309', 'line-style': 'dashed' } },
+        { selector: 'edge.origin-imported', style: { 'line-color': '#7c3aed', 'target-arrow-color': '#7c3aed', 'line-style': 'dashed' } },
+        { selector: 'edge.origin-unknown', style: { 'line-color': '#64748b', 'target-arrow-color': '#64748b', 'line-style': 'dotted' } },
+        { selector: 'edge.warning-related', style: { 'line-color': '#dc2626', 'target-arrow-color': '#dc2626', 'line-style': 'dotted', width: '5px' } },
+        { selector: 'edge.last-changed', style: { 'line-color': '#0f766e', 'target-arrow-color': '#0f766e', 'line-style': 'dashed', width: '5px' } },
         { selector: 'edge:selected', style: { 'line-color': '#ca8a04', 'target-arrow-color': '#ca8a04', width: '4px' } },
         { selector: 'edge.hovered', style: { 'line-color': '#2563eb', 'target-arrow-color': '#2563eb', width: '4px' } },
       ],
@@ -626,6 +666,8 @@ function mountGraph(viewport?: GraphViewport): void {
         state.graph = moveConcept(state.graph, event.target.id(), event.target.position()).graph;
         state.history = rememberGraph(state.history, previousGraph);
         state.layoutStatus = 'unsaved';
+        state.lastChanged = { kind: 'concept', id: event.target.id() };
+        updateWarningState(state.graph);
         state.message = 'Concept position updated. Use Save layout to keep it after reload.';
         state.error = undefined;
         renderShell();
@@ -640,7 +682,7 @@ function mountGraph(viewport?: GraphViewport): void {
       cy.zoom(viewport.zoom);
       cy.pan(viewport.pan);
     }
-    applyGraphSelectionClasses();
+    applyGraphStateClasses();
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'Graph rendering failed.';
     renderShell();
@@ -701,10 +743,23 @@ function clearSelectionState(): void {
   state.selectedConceptIds = [];
 }
 
-function applyGraphSelectionClasses(): void {
+function applyGraphStateClasses(): void {
   if (!cy) return;
   cy.elements().unselect();
+  cy.elements().removeClass('last-changed');
+  cy.elements().removeClass('warning-related');
   cy.nodes().removeClass('multi-selected');
+
+  for (const conceptId of state.warningElementIds.concepts) {
+    cy.getElementById(conceptId)?.addClass('warning-related');
+  }
+  for (const relationshipId of state.warningElementIds.relationships) {
+    cy.getElementById(relationshipId)?.addClass('warning-related');
+  }
+  if (state.lastChanged) {
+    cy.getElementById(state.lastChanged.id)?.addClass('last-changed');
+  }
+
   if (state.selectedKind === 'concept') {
     state.selectedConceptIds.forEach((id) => {
       const node = cy?.getElementById(id);
@@ -897,7 +952,8 @@ function applyAgentProposal(): void {
     state.agentProposal = undefined;
     state.agentAnswer = undefined;
     state.error = undefined;
-    state.warnings = graphWarnings(savedGraph);
+    state.lastChanged = result.changedKind && result.changedId ? { kind: result.changedKind, id: result.changedId } : undefined;
+    updateWarningState(savedGraph);
     state.activeDialog = undefined;
     state.selectedKind = result.changedKind;
     state.selectedId = result.changedKind ? result.changedId : undefined;
@@ -936,7 +992,7 @@ function visibleCenter(): GraphPosition {
   return { x: (extent.x1 + extent.x2) / 2, y: (extent.y1 + extent.y2) / 2 };
 }
 
-function applyMutation(message: string, mutation: () => GraphMutationResult, selectKind?: 'concept' | 'relationship'): void {
+function applyMutation(message: string, mutation: () => GraphMutationResult, selectKind?: ElementKind): void {
   if (!ensureEditing()) return;
 
   try {
@@ -949,7 +1005,8 @@ function applyMutation(message: string, mutation: () => GraphMutationResult, sel
     state.layoutStatus = 'saved';
     state.message = message;
     state.error = undefined;
-    state.warnings = graphWarnings(savedGraph);
+    state.lastChanged = selectKind ? { kind: selectKind, id: result.changedId } : undefined;
+    updateWarningState(savedGraph);
     state.agentAnswer = undefined;
     state.agentProposal = undefined;
     state.agentAppliedSummary = undefined;
@@ -1119,6 +1176,8 @@ function resetLayoutWithHistory(): void {
     rememberCurrentLayout();
     state.history = rememberGraph(state.history, previousGraph);
     state.layoutStatus = 'unsaved';
+    state.lastChanged = undefined;
+    updateWarningState(state.graph);
     state.message = 'Layout reset. Use Save layout to keep it after reload.';
     state.error = undefined;
     renderShell();
@@ -1154,7 +1213,8 @@ function saveCurrentLayout(): void {
     state.layoutStatus = 'saved';
     state.message = 'Layout saved in this browser.';
     state.error = undefined;
-    state.warnings = graphWarnings(state.graph);
+    state.lastChanged = undefined;
+    updateWarningState(state.graph);
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'Layout save failed.';
   } finally {
@@ -1200,7 +1260,8 @@ function restoreHistoryStep(step: GraphHistoryStep, message: string): void {
     state.layoutStatus = 'saved';
     state.message = message;
     state.error = undefined;
-    state.warnings = graphWarnings(savedGraph);
+    state.lastChanged = undefined;
+    updateWarningState(savedGraph);
     state.agentAnswer = undefined;
     state.agentProposal = undefined;
     state.agentAppliedSummary = undefined;
@@ -1230,12 +1291,49 @@ function reconcileSelection(): void {
   if (!selectionIsAvailable) clearSelectionState();
 }
 
-function validationWarnings(validation: { warnings: Array<{ message: string }> }): string[] {
+function validationWarningMessages(validation: Pick<GraphValidationResult, 'warnings'>): string[] {
   return validation.warnings.map((warning) => warning.message);
 }
 
-function graphWarnings(graph: KnowledgeGraph): string[] {
-  return validationWarnings(validateGraph(graph));
+function emptyWarningElementIds(): WarningElementIds {
+  return { concepts: [], relationships: [] };
+}
+
+function warningElementIdsFromValidation(validation: Pick<GraphValidationResult, 'warnings'>, graph: KnowledgeGraph): WarningElementIds {
+  const concepts = new Set<string>();
+  const relationships = new Set<string>();
+
+  for (const warning of validation.warnings) {
+    const path = warning.path ?? '';
+    const nodeIndex = path.match(/^nodes\[(\d+)]/);
+    if (nodeIndex) {
+      const node = graph.nodes[Number(nodeIndex[1])];
+      if (node) concepts.add(node.id);
+      continue;
+    }
+
+    const edgeIndex = path.match(/^edges\[(\d+)]/);
+    if (edgeIndex) {
+      const edge = graph.edges[Number(edgeIndex[1])];
+      if (edge) relationships.add(edge.id);
+      continue;
+    }
+
+    const layoutConceptId = path.match(/^layout\.([^.[\]]+)$/)?.[1];
+    if (layoutConceptId && graph.nodes.some((node) => node.id === layoutConceptId)) concepts.add(layoutConceptId);
+
+    if (warning.code === 'layout_missing' || warning.code === 'layout_invalid') {
+      graph.nodes.forEach((node) => concepts.add(node.id));
+    }
+  }
+
+  return { concepts: [...concepts], relationships: [...relationships] };
+}
+
+function updateWarningState(graph: KnowledgeGraph): void {
+  const validation = validateGraph(graph);
+  state.warnings = validationWarningMessages(validation);
+  state.warningElementIds = warningElementIdsFromValidation(validation, graph);
 }
 
 function renderWarnings(): string {

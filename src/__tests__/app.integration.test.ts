@@ -8,6 +8,12 @@ type CytoscapeElementDefinition = {
   group?: 'nodes' | 'edges';
   data: { id: string; source?: string; target?: string; label?: string; type?: string; importanceLevel?: string };
   position?: GraphPosition;
+  classes?: string;
+};
+
+type CytoscapeOptions = {
+  elements: CytoscapeElementDefinition[];
+  style?: Array<{ selector: string }>;
 };
 
 type CytoscapeEvent = {
@@ -21,7 +27,9 @@ class FakeElement {
   private readonly classes = new Set<string>();
   private selected = false;
 
-  constructor(readonly definition: CytoscapeElementDefinition) {}
+  constructor(readonly definition: CytoscapeElementDefinition) {
+    definition.classes?.split(/\s+/).filter(Boolean).forEach((className) => this.classes.add(className));
+  }
 
   id(): string {
     return this.definition.data.id;
@@ -89,8 +97,8 @@ class FakeCore {
     }
 
     if (!maybeHandler) return;
-    if (selectorOrHandler === 'node') this.addHandler(this.nodeHandlers, eventName, maybeHandler);
-    if (selectorOrHandler === 'edge') this.addHandler(this.edgeHandlers, eventName, maybeHandler);
+    if (selectorOrHandler === 'node' || selectorOrHandler === 'node, edge') this.addHandler(this.nodeHandlers, eventName, maybeHandler);
+    if (selectorOrHandler === 'edge' || selectorOrHandler === 'node, edge') this.addHandler(this.edgeHandlers, eventName, maybeHandler);
   }
 
   triggerNodeTap(id: string, shiftKey = false): void {
@@ -103,6 +111,18 @@ class FakeCore {
     const target = this.edgeElements.find((element) => element.id() === id);
     if (!target) throw new Error(`Missing fake edge ${id}`);
     this.edgeHandlers.get('tap')?.forEach((handler) => handler({ target }));
+  }
+
+  triggerNodeMouseover(id: string): void {
+    this.triggerElementEvent(this.nodeElements, this.nodeHandlers, 'mouseover', id);
+  }
+
+  triggerEdgeMouseover(id: string): void {
+    this.triggerElementEvent(this.edgeElements, this.edgeHandlers, 'mouseover', id);
+  }
+
+  triggerNodeMouseout(id: string): void {
+    this.triggerElementEvent(this.nodeElements, this.nodeHandlers, 'mouseout', id);
   }
 
   destroy(): void {}
@@ -139,12 +159,19 @@ class FakeCore {
     return [...this.nodeElements, ...this.edgeElements].find((element) => element.id() === id);
   }
 
+  private triggerElementEvent(elements: FakeElement[], handlers: Map<string, CytoscapeHandler[]>, eventName: string, id: string): void {
+    const target = elements.find((element) => element.id() === id);
+    if (!target) throw new Error(`Missing fake element ${id}`);
+    handlers.get(eventName)?.forEach((handler) => handler({ target }));
+  }
+
   private addHandler(map: Map<string, CytoscapeHandler[]>, eventName: string, handler: CytoscapeHandler): void {
     map.set(eventName, [...(map.get(eventName) ?? []), handler]);
   }
 }
 
 let currentCore: FakeCore | undefined;
+let latestStyleSelectors: string[] = [];
 
 function core(): FakeCore {
   if (!currentCore) throw new Error('Expected Cytoscape fake core to be mounted.');
@@ -195,11 +222,14 @@ function selectedOptions(formElement: HTMLFormElement, name: string): string[] {
 
 describe('app UI integration', () => {
   it('gates editing and exercises manual edit plus agent question/proposal flows', async () => {
+    vi.resetModules();
     document.body.innerHTML = '<div id="app"></div>';
     localStorage.clear();
     currentCore = undefined;
+    latestStyleSelectors = [];
     vi.doMock('cytoscape', () => ({
-      default: vi.fn((options: { elements: CytoscapeElementDefinition[] }) => {
+      default: vi.fn((options: CytoscapeOptions) => {
+        latestStyleSelectors = options.style?.map((entry) => entry.selector) ?? [];
         currentCore = new FakeCore(options.elements);
         return currentCore;
       }),
@@ -211,6 +241,18 @@ describe('app UI integration', () => {
     expect(document.body.textContent).toContain('Full graph visible');
     expect(core().nodeElements).toHaveLength(10);
     expect(core().getElementById('agent-loop')?.definition.data.importanceLevel).toBe('high');
+    expect(latestStyleSelectors).toEqual(expect.arrayContaining([
+      'edge.origin-source',
+      'edge.origin-user',
+      'edge.origin-agent',
+      'edge.origin-imported',
+      'node.last-changed',
+      'edge.last-changed',
+      'node.warning-related',
+      'edge.warning-related',
+    ]));
+    expect(document.body.textContent).toContain('Last changed');
+    expect(document.body.textContent).toContain('Warning');
 
     const filterForm = form('data-filter-form');
     setField(filterForm, 'minImportanceScore', '0.66');
@@ -224,6 +266,10 @@ describe('app UI integration', () => {
     expect(core().nodeElements).toHaveLength(10);
     expect(core().edgeElements).toHaveLength(11);
 
+    core().triggerNodeMouseover('prompting');
+    expect(core().getElementById('prompting')?.hasClass('hovered')).toBe(true);
+    core().triggerNodeMouseout('prompting');
+    expect(core().getElementById('prompting')?.hasClass('hovered')).toBe(false);
     core().triggerNodeTap('prompting');
     expect(document.body.textContent).toContain('Source context');
     expect(document.body.textContent).toContain('Applied Agentic AI notes');
@@ -259,6 +305,9 @@ describe('app UI integration', () => {
     submit(relationshipForm);
 
     let graph = savedGraph();
+    const createdRelationshipId = graph.edges.find((edge) => edge.source === 'evaluation' && edge.target === 'prompting' && edge.label === 'validates with')?.id;
+    expect(createdRelationshipId).toBeTruthy();
+    expect(core().getElementById(createdRelationshipId ?? '')?.hasClass('last-changed')).toBe(true);
     expect(graph.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: 'evaluation', target: 'prompting', label: 'validates with', notes: 'Created from the ordered selection.' }),
     ]));
@@ -289,6 +338,7 @@ describe('app UI integration', () => {
     expect(graph.nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'review-lens', label: 'Review Lens', type: 'review-method', notes: 'Added through the app-level creation dialog.' }),
     ]));
+    expect(core().getElementById('review-lens')?.hasClass('last-changed')).toBe(true);
     expect(graph.nodes.find((node) => node.id === 'review-lens')?.sourceRefs).toBeUndefined();
     expect(document.body.textContent).not.toContain('Source context unavailable.');
     expect(graph.edges).toEqual(expect.arrayContaining([
@@ -349,6 +399,7 @@ describe('app UI integration', () => {
     expect(graph.nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'agent-review', label: 'Agent Review', type: 'method', notes: 'Proposed by the agent helper.', origin: 'agent' }),
     ]));
+    expect(core().getElementById('agent-review')?.hasClass('last-changed')).toBe(true);
     expect(document.body.textContent).toContain('Applied agent change');
 
     const typeFilterForm = form('data-filter-form');
@@ -382,5 +433,41 @@ describe('app UI integration', () => {
     submit(form('data-agent-change-form'));
     expect(document.body.textContent).toContain('Could not propose a graph change');
     expect(savedGraph().nodes).toHaveLength(nodeCountAfterAgentApply);
+  });
+
+  it('marks graph elements that are tied to recoverable validation warnings', async () => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="app"></div>';
+    currentCore = undefined;
+    latestStyleSelectors = [];
+    localStorage.clear();
+    localStorage.setItem(WORKING_GRAPH_STORAGE_KEY, JSON.stringify({
+      graphId: 'warning-graph',
+      name: 'Warning Graph',
+      stateType: 'working',
+      nodes: [
+        { id: 'alpha', label: 'Alpha', type: 'concept', origin: 'mystery' },
+        { id: 'beta', label: 'Beta', type: 'concept', origin: 'source' },
+      ],
+      edges: [
+        { id: 'edge-alpha-beta', source: 'alpha', target: 'beta', label: 'connects', origin: 'mystery' },
+      ],
+      layout: { alpha: { x: 0, y: 0 } },
+    }));
+    vi.doMock('cytoscape', () => ({
+      default: vi.fn((options: CytoscapeOptions) => {
+        latestStyleSelectors = options.style?.map((entry) => entry.selector) ?? [];
+        currentCore = new FakeCore(options.elements);
+        return currentCore;
+      }),
+    }));
+
+    await import('../app');
+
+    expect(document.body.textContent).toContain('3 warnings');
+    expect(latestStyleSelectors).toEqual(expect.arrayContaining(['node.warning-related', 'edge.warning-related']));
+    expect(core().getElementById('alpha')?.hasClass('warning-related')).toBe(true);
+    expect(core().getElementById('beta')?.hasClass('warning-related')).toBe(true);
+    expect(core().getElementById('edge-alpha-beta')?.hasClass('warning-related')).toBe(true);
   });
 });

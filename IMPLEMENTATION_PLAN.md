@@ -8,13 +8,14 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 - Present: the fixture is a non-private Agentic AI graph seed with concepts, relationships, labels, concept notes, origins, saved positions, first-class `sourceRefs` examples on concepts/relationships, and an unavailable source-origin example.
 - Present: a single-package pnpm/Vite/TypeScript/Cytoscape scaffold with `src/app.ts`, graph canonical types/validation/storage/metrics/mutations/Cytoscape adapter modules, CSS workbench shell, and Vitest tests.
 - No `src/lib` directory exists. Current app/UI code is in `src/app.ts`, renderer-neutral graph logic is in `src/graph/*`, styles are in `src/styles/app.css`, and app integration coverage is in `src/__tests__/app.integration.test.ts`.
-- Present: validation commands are known passing for the current graph insights/filtering increment: focused `pnpm test src/graph/__tests__/metrics.test.ts src/graph/__tests__/cytoscapeAdapter.test.ts src/__tests__/app.integration.test.ts` passed (3 files, 12 tests), full `pnpm test` passed (9 files, 45 tests), and `pnpm build` passed.
+- Present: validation commands are known passing for the current P1 graph visual distinction increment: focused `pnpm test src/__tests__/app.integration.test.ts` passed (1 file, 2 tests), full `pnpm test` passed (9 files, 46 tests), and `pnpm build` passed with only the existing Vite chunk-size warning.
 - Present: non-blocking recoverable graph warnings for layout/origin/source-reference issues are surfaced in the app status/message area, and fallback-position confidence tests are in place.
 - Present in `src/app.ts`/`src/graph/mutations.ts`: Phase 1 selection, inspector with source context/unavailable-state rendering, fit/reset layout, explicit save-layout controls, edit-mode gated Phase 2 manual graph operations, toolbar/keyboard undo-redo for accepted manual edits, and a secondary Phase 3 agent panel.
 - Present in Phase 2 UI: single concept/relationship creation dialogs, concept type datalist choose-or-new entry, ordered shift-click concept multi-selection with count/visual distinction and relationship endpoint defaults, optional selected-concept auto-connect as one atomic validated persisted undoable mutation, relationship direction/reverse controls, edit-mode details-panel forms for concept label/type/notes and relationship label/notes with source/target read-only, and guarded Delete/Backspace deletion outside editable controls.
-- Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, Reload graph UI localStorage round trip after deletion, and basic agent question/proposal flows.
+- Present: automated app-level/jsdom frontend integration coverage for key Phase 2 UI flows: edit-mode gating, ordered shift-click multi-selection with visual class assertions, relationship dialog endpoint prefill/reverse direction, selected-concept auto-connect creation, details-panel edits, guarded Delete/Backspace deletion, undo/redo, Reload graph UI localStorage round trip after deletion, and basic agent question/proposal flows. Current coverage also checks P1 visual selectors, hover class behavior, node/edge last-changed classes, and warning-related classes.
 - Present: P0 graph insights/filtering controls with graph-derived importance scores/levels, type/importance/community filters, visible-vs-total counts, full-graph restore, hidden-without-deletion behavior, coherent recomputation after accepted manual or agent graph changes, and community visual distinction via community data/classes/color.
-- Still missing: richer visual state distinctions beyond the current community/type/importance treatments, observable saving feedback, and manual browser smoke evidence for the Phase 2/Phase 3 UI flows, including browser smoke for filters.
+- Present: P1 graph visual distinction now covers source/user/agent/imported/unknown origin styling for nodes and edges, selected/multi-selected/hover states, node/edge last-changed and warning-related classes/styles, and a compact in-graph legend.
+- Still missing: observable saving feedback and manual browser smoke evidence for the Phase 1/2/3 UI flows, including browser smoke for filters and visual-state comprehension.
 - Present: `specs/10-manual-editing.md` requires current-session undo/redo for recent accepted manual edits without historical replay, branching, reload persistence, or audit-grade provenance.
 - Treat ignored `.data/`, `ralph-context/`, and historical `pre-sigma-rewrite` code as reference only, not current implementation.
 
@@ -73,11 +74,12 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Completed: community identity is exposed to Cytoscape through element data/classes and community color for visual distinction, with community filter coverage in graph/app tests.
   - Evidence: focused `pnpm test src/graph/__tests__/metrics.test.ts src/graph/__tests__/cytoscapeAdapter.test.ts src/__tests__/app.integration.test.ts` passed (3 files, 12 tests); full `pnpm test` passed (9 files, 45 tests); `pnpm build` passed.
 
-- [ ] P1: Expand graph visual distinction states.
-  - Add visible treatment for source/user/imported/agent origins for nodes and, if useful, edges; currently only source-origin node styling is explicit.
-  - Add treatment for ordinary, hovered, selected, multi-selected, newly/last-changed, and warning-related elements.
-  - Community/type/importance classes and community color styling now exist; remaining visual distinction work should focus on origin, hover, selected, newly/last-changed, and warning-related states.
-  - Verify the visual language helps comprehension without turning the app into a general dashboard.
+- [x] P1: Expand graph visual distinction states.
+  - Completed: source/user/agent/imported/unknown origin styling exists for nodes and edges.
+  - Completed: selected, multi-selected, hovered, last-changed, and warning-related states have Cytoscape classes/styles; ordinary elements retain the baseline styling.
+  - Completed: warning-related classes are derived from recoverable validation warning paths for affected concepts/relationships.
+  - Completed: a compact graph legend explains origin, last-changed, and warning-related visual states without turning the app into a general dashboard.
+  - Evidence: focused `pnpm test src/__tests__/app.integration.test.ts` passed (1 file, 2 tests); full `pnpm test` passed (9 files, 46 tests); `pnpm build` passed with only the existing Vite chunk-size warning.
 
 - [ ] P1: Reduce agent panel prominence until agent work is active.
   - Make the graph and inspector remain visually dominant before users intentionally use agent features.
@@ -97,7 +99,7 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
   - Add tests or browser evidence for content-save feedback, layout-save feedback, malformed saved-data recovery, and save-failure UX.
 
 - [ ] P1: Complete manual browser smoke for the current Phase 1/2/3 workbench.
-  - Smoke fresh checkout graph display, readable labels, zoom/pan/fit/reset, concept and relationship selection/inspector, source-context states, filters once implemented, edit-mode guidance, dialog flows, shift-click multi-selection, details-panel editing, Delete/Backspace guards, undo/redo shortcuts, drag/save layout, reload/localStorage round trips, recoverable-error usability, and secondary agent panel behavior.
+  - Smoke fresh checkout graph display, readable labels, zoom/pan/fit/reset, concept and relationship selection/inspector, source-context states, filters, visual-state legend/comprehension, edit-mode guidance, dialog flows, shift-click multi-selection, details-panel editing, Delete/Backspace guards, undo/redo shortcuts, drag/save layout, reload/localStorage round trips, recoverable-error usability, and secondary agent panel behavior.
   - Record commands/browser path and findings in the handoff; do not mark the related partial items complete until this evidence exists.
 
 - [x] Implement Phase 2 manual graph operations behind an explicit editing affordance.
@@ -149,16 +151,16 @@ Plan-only tracker for the greenfield Cytoscape-first knowledge graph workbench. 
 ## Validation plan
 
 - [x] Tooling smoke: build and test scripts exist and current handoff commands pass.
-  - Current handoff validation: focused `pnpm test src/graph/__tests__/metrics.test.ts src/graph/__tests__/cytoscapeAdapter.test.ts src/__tests__/app.integration.test.ts` passed with 3 files / 12 tests; full `pnpm test` passed with 9 files / 45 tests; `pnpm build` passed.
+  - Current handoff validation: focused `pnpm test src/__tests__/app.integration.test.ts` passed with 1 file / 2 tests; full `pnpm test` passed with 9 files / 46 tests; `pnpm build` passed with only the existing Vite chunk-size warning.
   - Run commands documented in `AGENTS.md`: `pnpm install`, `pnpm dev`, `pnpm test`, `pnpm build`.
 - [x] Graph unit tests: valid fixture passes; duplicate ids, dangling relationships, malformed graph data, invalid/recoverable layout cases, and fallback-position confidence are covered for the initial validation layer.
 - [x] Adapter tests: canonical graph converts to Cytoscape elements with expected ids, labels, source/target endpoints, positions, origin classes, type classes, degree classes, and relationship counts.
 - [x] Loader/recovery tests: working graph wins over fixture, missing working graph falls back to fixture, malformed graph reports an error and preserves the last valid graph.
 - [x] Source-grounding tests: `sourceRefs` validation/preservation, inspector rendering for available context, unavailable-context messaging for source-origin elements, and preservation through simple manual/agent edits.
 - [x] Graph insights/filtering tests: cover degree-normalized importance scores/levels, type/community/importance filters, community visual data/classes/color, visible-vs-total counts, full restore, mutation while filtered, and no graph-content deletion.
-- [ ] Visual/workbench tests or smoke: origin styling across source/user/imported/agent, selected/multi-selected/hover/newly-changed/warning states, and agent panel secondary/collapsed behavior.
+- [ ] Partially covered visual/workbench tests or smoke: automated jsdom coverage checks P1 visual selectors, hover class behavior, last-changed node/edge classes, and warning-related classes; remaining browser smoke should confirm visual comprehension in a real browser and agent panel secondary/collapsed behavior.
 - [ ] Loading/saving feedback tests: content-save feedback, layout-save feedback, malformed saved-data UI recovery, save-failure UX, and render timing if localStorage persistence remains synchronous.
-- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows, source-context rendering, and P0 filter behavior; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, source context, filters, and recoverable-error usability.
+- [ ] Partially covered frontend integration/manual smoke: automated app-level coverage exists for key Phase 2 UI flows, source-context rendering, P0 filter behavior, and P1 visual selector/state behavior; manual browser smoke is still needed for fresh checkout graph display, readable labels, zoom/pan/fit/reset, selection/inspector behavior, review-mode action guidance, source context, filters, visual-state comprehension, and recoverable-error usability.
 - [x] Phase 2 focused tests: validated mutation helpers cover valid add/edit/delete/reposition behavior, current-session undo/redo history, persistence to working graph storage, and rejection of invalid changes without replacing the previous valid graph.
 - [x] Phase 2 app-level/jsdom UI tests: cover edit-mode gating, ordered shift-click multi-selection including visual class behavior, relationship dialog endpoint prefill/reverse direction, concept creation with selected-concept auto-connect, details-panel edits, Delete/Backspace focus guard and deletion, undo/redo, and Reload graph UI localStorage round trip after deletion.
 - [ ] Phase 2 manual browser smoke: confirm the same dialog, multi-selection, details-panel, keyboard, undo/redo, deletion, drag/save layout, and localStorage flows in a real browser.
